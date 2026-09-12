@@ -1,0 +1,93 @@
+// QA round 3 (US-18) — LandmarkMap exercised through the REAL, full
+// ProvinceDetailScreen (not the isolated component tests in
+// src/components/LandmarkMap.test.tsx, and not the pure-function tests in
+// src/utils/landmarkMap.test.ts). This is the "component ทำงานถูกครบวงจร"
+// check requested for this round: real dataset, real storage mock, real
+// CheckinContext, tapping a map point end-to-end through to persisted
+// check-in state and the list below.
+//
+// The degenerate-bounding-box (single-coordinate-landmark) case is covered
+// separately in landmarkMapDegenerateBbox.test.tsx, which needs a *static*
+// jest.mock of the dataset module (no real province currently ships with
+// exactly one coordinate'd landmark) — keeping that in its own file avoids
+// mixing a mocked dataset with the real one inside a single module graph.
+import React from 'react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react-native';
+import { NavigationContainer } from '@react-navigation/native';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import type { RootStackParamList } from '../../navigation/types';
+import ProvinceDetailScreen from '../../screens/ProvinceDetailScreen';
+import { JournalProvider } from '../../storage/JournalContext';
+import { CheckinProvider } from '../../storage/CheckinContext';
+
+jest.mock('../../storage/db');
+const dbMock = require('../../storage/db');
+
+const Stack = createNativeStackNavigator<RootStackParamList>();
+
+function TestApp({ provinceId }: { provinceId: string }) {
+  return (
+    <JournalProvider>
+      <CheckinProvider>
+        <NavigationContainer>
+          <Stack.Navigator screenOptions={{ headerShown: false }}>
+            <Stack.Screen name="ProvinceDetail" component={ProvinceDetailScreen} initialParams={{ provinceId }} />
+          </Stack.Navigator>
+        </NavigationContainer>
+      </CheckinProvider>
+    </JournalProvider>
+  );
+}
+
+describe('LandmarkMap wired through the real ProvinceDetailScreen (US-18)', () => {
+  beforeEach(() => {
+    dbMock.__seed([]);
+    dbMock.__seedCheckins([]);
+  });
+
+  it('tapping a point on the map for a real curated province (krabi) toggles the SAME landmark id shown in the list below, and persists it', async () => {
+    await render(<TestApp provinceId="krabi" />);
+    await waitFor(() => expect(screen.getByText('เช็คอินแล้ว 0/3 แห่ง')).toBeTruthy());
+
+    // The map's point for หาดไร่เลย์ (kbi-railay-beach) — real coords from the
+    // shipped dataset, not a mock.
+    const mapPoint = screen.getByLabelText('หาดไร่เลย์, ยังไม่เช็คอิน');
+    fireEvent.press(mapPoint);
+
+    // Progress indicator (fed by the SAME checkins state as the map) updates.
+    await waitFor(() => expect(screen.getByText('เช็คอินแล้ว 1/3 แห่ง')).toBeTruthy());
+
+    // Both the map point AND the list row below re-render to the checked-in
+    // label for the exact same landmark (their accessibility-label copy
+    // happens to converge to the same string once visited=true — "หาดไร่เลย์,
+    // เช็คอินแล้ว" — which is itself a useful cross-check: exactly 2 elements
+    // should now show it, one from the map, one from the list row), proving
+    // the map's onToggle used the real landmark id (kbi-railay-beach), not a
+    // mismatched/different id, and that both surfaces read the same
+    // underlying checkins state.
+    await waitFor(() => expect(screen.getAllByLabelText('หาดไร่เลย์, เช็คอินแล้ว')).toHaveLength(2));
+
+    // And the underlying storage mock recorded a check-in keyed by that exact id.
+    const stored = dbMock.__getCheckinStore();
+    expect(stored).toContainEqual(
+      expect.objectContaining({ landmarkId: 'kbi-railay-beach', provinceId: 'krabi', visited: true })
+    );
+
+    // Tapping the SAME map point again toggles it back off, and the list/progress
+    // reflect that live too (not stuck / not diverging from the map).
+    fireEvent.press(screen.getAllByLabelText('หาดไร่เลย์, เช็คอินแล้ว')[0]);
+    await waitFor(() => expect(screen.getByText('เช็คอินแล้ว 0/3 แห่ง')).toBeTruthy());
+  });
+
+  it('a province with zero curated landmarks (chaiyaphum) shows the US-8 not-curated empty state through the real screen, never the map fallback text, and never errors', async () => {
+    await render(<TestApp provinceId="chaiyaphum" />);
+    await waitFor(() =>
+      expect(screen.getByText('ยังไม่มีข้อมูลสถานที่แนะนำสำหรับจังหวัดนี้')).toBeTruthy()
+    );
+    // LandmarkMap is never rendered at all in this branch (LandmarkList returns
+    // early for landmarks.length === 0) — its own "no coordinates" fallback text
+    // must NOT appear here; these are two different empty states for two
+    // different reasons (US-8 AC4 vs US-18 AC2) and must not be conflated.
+    expect(screen.queryByText('ยังไม่มีข้อมูลตำแหน่งสำหรับสถานที่แนะนำของจังหวัดนี้')).toBeNull();
+  });
+});
