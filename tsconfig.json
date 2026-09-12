@@ -2,6 +2,16 @@
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
     "strict": true,
-    "types": ["jest"]
+    // "node" added for the T60/T64 dev-only scripts/ (fs/path/process globals) —
+    // @types/node is already present transitively (see docs/dev-notes.md), no
+    // new dependency installed. Does not affect the app bundle (scripts/ is
+    // never imported by src/).
+    "types": ["jest", "node"],
+    // T60: scripts/extract-overpass-landmarks.ts is run directly via plain
+    // `node` (Node 22.6+ native TS type-stripping), which requires explicit
+    // ".ts" extensions on relative import specifiers (ESM resolution rules).
+    // This flag lets `tsc --noEmit` accept that same syntax instead of
+    // erroring on it; safe to enable project-wide since noEmit is already on.
+    "allowImportingTsExtensions": true
   }
 }

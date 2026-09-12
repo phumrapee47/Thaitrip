@@ -1,0 +1,332 @@
+[
+  {
+    "provinceId": "amnat-charoen",
+    "nameEn": "Amnat Charoen",
+    "found": 5,
+    "status": "ok"
+  },
+  {
+    "provinceId": "ang-thong",
+    "nameEn": "Ang Thong",
+    "found": 5,
+    "status": "ok"
+  },
+  {
+    "provinceId": "buri-ram",
+    "nameEn": "Buri Ram",
+    "found": 5,
+    "status": "ok"
+  },
+  {
+    "provinceId": "chachoengsao",
+    "nameEn": "Chachoengsao",
+    "found": 0,
+    "status": "request-failed"
+  },
+  {
+    "provinceId": "chai-nat",
+    "nameEn": "Chai Nat",
+    "found": 5,
+    "status": "ok"
+  },
+  {
+    "provinceId": "chaiyaphum",
+    "nameEn": "Chaiyaphum",
+    "found": 0,
+    "status": "empty"
+  },
+  {
+    "provinceId": "chanthaburi",
+    "nameEn": "Chanthaburi",
+    "found": 5,
+    "status": "ok"
+  },
+  {
+    "provinceId": "chumphon",
+    "nameEn": "Chumphon",
+    "found": 5,
+    "status": "ok"
+  },
+  {
+    "provinceId": "kalasin",
+    "nameEn": "Kalasin",
+    "found": 5,
+    "status": "ok"
+  },
+  {
+    "provinceId": "kamphaeng-phet",
+    "nameEn": "Kamphaeng Phet",
+    "found": 5,
+    "status": "ok"
+  },
+  {
+    "provinceId": "kanchanaburi",
+    "nameEn": "Kanchanaburi",
+    "found": 5,
+    "status": "ok"
+  },
+  {
+    "provinceId": "khon-kaen",
+    "nameEn": "Khon Kaen",
+    "found": 5,
+    "status": "ok"
+  },
+  {
+    "provinceId": "lampang",
+    "nameEn": "Lampang",
+    "found": 5,
+    "status": "ok"
+  },
+  {
+    "provinceId": "lamphun",
+    "nameEn": "Lamphun",
+    "found": 5,
+    "status": "ok"
+  },
+  {
+    "provinceId": "loei",
+    "nameEn": "Loei",
+    "found": 5,
+    "status": "ok"
+  },
+  {
+    "provinceId": "lop-buri",
+    "nameEn": "Lop Buri",
+    "found": 4,
+    "status": "ok"
+  },
+  {
+    "provinceId": "mae-hong-son",
+    "nameEn": "Mae Hong Son",
+    "found": 5,
+    "status": "ok"
+  },
+  {
+    "provinceId": "maha-sarakham",
+    "nameEn": "Maha Sarakham",
+    "found": 5,
+    "status": "ok"
+  },
+  {
+    "provinceId": "mukdahan",
+    "nameEn": "Mukdahan",
+    "found": 5,
+    "status": "ok"
+  },
+  {
+    "provinceId": "nakhon-nayok",
+    "nameEn": "Nakhon Nayok",
+    "found": 5,
+    "status": "ok"
+  },
+  {
+    "provinceId": "nakhon-pathom",
+    "nameEn": "Nakhon Pathom",
+    "found": 5,
+    "status": "ok"
+  },
+  {
+    "provinceId": "nakhon-phanom",
+    "nameEn": "Nakhon Phanom",
+    "found": 2,
+    "status": "partial"
+  },
+  {
+    "provinceId": "nakhon-ratchasima",
+    "nameEn": "Nakhon Ratchasima",
+    "found": 5,
+    "status": "ok"
+  },
+  {
+    "provinceId": "nakhon-sawan",
+    "nameEn": "Nakhon Sawan",
+    "found": 5,
+    "status": "ok"
+  },
+  {
+    "provinceId": "nakhon-si-thammarat",
+    "nameEn": "Nakhon Si Thammarat",
+    "found": 5,
+    "status": "ok"
+  },
+  {
+    "provinceId": "nan",
+    "nameEn": "Nan",
+    "found": 0,
+    "status": "request-failed"
+  },
+  {
+    "provinceId": "narathiwat",
+    "nameEn": "Narathiwat",
+    "found": 5,
+    "status": "ok"
+  },
+  {
+    "provinceId": "nong-bua-lam-phu",
+    "nameEn": "Nong Bua Lam Phu",
+    "found": 4,
+    "status": "ok"
+  },
+  {
+    "provinceId": "nong-khai",
+    "nameEn": "Nong Khai",
+    "found": 3,
+    "status": "ok"
+  },
+  {
+    "provinceId": "nonthaburi",
+    "nameEn": "Nonthaburi",
+    "found": 5,
+    "status": "ok"
+  },
+  {
+    "provinceId": "pathum-thani",
+    "nameEn": "Pathum Thani",
+    "found": 5,
+    "status": "ok"
+  },
+  {
+    "provinceId": "pattani",
+    "nameEn": "Pattani",
+    "found": 0,
+    "status": "empty"
+  },
+  {
+    "provinceId": "phangnga",
+    "nameEn": "Phangnga",
+    "found": 5,
+    "status": "ok"
+  },
+  {
+    "provinceId": "phatthalung",
+    "nameEn": "Phatthalung",
+    "found": 5,
+    "status": "ok"
+  },
+  {
+    "provinceId": "phayao",
+    "nameEn": "Phayao",
+    "found": 5,
+    "status": "ok"
+  },
+  {
+    "provinceId": "phetchabun",
+    "nameEn": "Phetchabun",
+    "found": 5,
+    "status": "ok"
+  },
+  {
+    "provinceId": "phetchaburi",
+    "nameEn": "Phetchaburi",
+    "found": 5,
+    "status": "ok"
+  },
+  {
+    "provinceId": "phichit",
+    "nameEn": "Phichit",
+    "found": 0,
+    "status": "request-failed"
+  },
+  {
+    "provinceId": "phitsanulok",
+    "nameEn": "Phitsanulok",
+    "found": 5,
+    "status": "ok"
+  },
+  {
+    "provinceId": "phrae",
+    "nameEn": "Phrae",
+    "found": 5,
+    "status": "ok"
+  },
+  {
+    "provinceId": "prachin-buri",
+    "nameEn": "Prachin Buri",
+    "found": 5,
+    "status": "ok"
+  },
+  {
+    "provinceId": "prachuap-khiri-khan",
+    "nameEn": "Prachuap Khiri Khan",
+    "found": 5,
+    "status": "ok"
+  },
+  {
+    "provinceId": "ranong",
+    "nameEn": "Ranong",
+    "found": 0,
+    "status": "request-failed"
+  },
+  {
+    "provinceId": "ratchaburi",
+    "nameEn": "Ratchaburi",
+    "found": 0,
+    "status": "request-failed"
+  },
+  {
+    "provinceId": "rayong",
+    "nameEn": "Rayong",
+    "found": 0,
+    "status": "request-failed"
+  },
+  {
+    "provinceId": "roi-et",
+    "nameEn": "Roi Et",
+    "found": 0,
+    "status": "request-failed"
+  },
+  {
+    "provinceId": "sa-kaeo",
+    "nameEn": "Sa Kaeo",
+    "found": 0,
+    "status": "request-failed"
+  },
+  {
+    "provinceId": "sakon-nakhon",
+    "nameEn": "Sakon Nakhon",
+    "found": 0,
+    "status": "request-failed"
+  },
+  {
+    "provinceId": "samut-prakan",
+    "nameEn": "Samut Prakan",
+    "found": 0,
+    "status": "request-failed"
+  },
+  {
+    "provinceId": "samut-sakhon",
+    "nameEn": "Samut Sakhon",
+    "found": 0,
+    "status": "request-failed"
+  },
+  {
+    "provinceId": "samut-songkhram",
+    "nameEn": "Samut Songkhram",
+    "found": 0,
+    "status": "request-failed"
+  },
+  {
+    "provinceId": "saraburi",
+    "nameEn": "Saraburi",
+    "found": 0,
+    "status": "request-failed"
+  },
+  {
+    "provinceId": "satun",
+    "nameEn": "Satun",
+    "found": 0,
+    "status": "request-failed"
+  },
+  {
+    "provinceId": "si-sa-ket",
+    "nameEn": "Si Sa Ket",
+    "found": 0,
+    "status": "request-failed"
+  },
+  {
+    "provinceId": "sing-buri",
+    "nameEn": "Sing Buri",
+    "found": 0,
+    "status": "request-failed"
+  }
+]

@@ -167,3 +167,91 @@
 2. **T31 (P2) แก้แล้ว** — ดูรายละเอียดที่ tasks.md T31 หมายเหตุ; สรุปคือ generate icon/splash ใหม่เป็น solid-color + pin symbol ตามสเปคของ PM แทน Expo default เดิม
 3. **T30 (P2) ยังไม่แก้ได้** — ยังไม่มีอุปกรณ์/emulator จริงในสภาพแวดล้อมนี้เหมือนเดิม ไม่เปลี่ยนแปลงจากที่ QA บันทึกไว้ — ต้อง manual test บนมือถือจริงก่อน release
 4. Regression check: `npx tsc --noEmit` ผ่านสะอาด, `npx jest` ทั้งโปรเจกต์ 25 suites ผ่าน (128 passed, 1 skip เดิมที่มีเอกสารอธิบายแล้ว) — ไม่มี suite ไหนพังจากการแก้ 2 ข้อนี้
+
+## รอบ 3: OSM Data Integration (US-16 – US-20, T60–T74)
+
+### Task ที่ implement แล้ว
+
+- [x] T60 — ไฟล์: `scripts/extract-overpass-landmarks.ts` (CLI entrypoint) + `scripts/lib/overpass-extract-core.ts` (pure logic) + `scripts/extract-overpass-landmarks.test.ts` (15 unit tests, no network) — dev/build-time only, ไม่ import จาก `src/` เลย ตาม constraint ของ PM ข้อ 2/13 หมายเหตุสำคัญของ implementation:
+  - Area matching ใช้ **bulk query เดียว** ดึง admin boundary (`admin_level=4`) ของทั้งประเทศไทยครั้งเดียว (`relation["boundary"="administrative"]["admin_level"="4"](area.th)`) แล้ว match แต่ละจังหวัดด้วย normalized `name:en` (ตัด "Province" suffix, ลบช่องว่าง/ขีด, พิเศษ "Bangkok Metropolis"→"bangkok") แทนที่จะยิง query แยกทีละจังหวัดเพื่อหา area — ลดจำนวน request ลง 76 ครั้งเหลือ 1 ครั้ง (`buildProvinceAreaMap`/`normalizeProvinceNameEn`, unit-tested)
+  - **ไม่ใช้พิกัด centroid จาก `thailand-provinces.ts`** ตามที่ requirements.md เสนอไว้เป็นทางเลือก เพราะพิสูจน์แล้วด้วยมือ (ยิง query จริงตอน dev) ว่า centroid นั้นเป็นพิกัดในระบบ SVG หน้าจอ (0-520 x 0-955) ไม่ใช่ lat/lng จริง — ใช้ query แบบ `area["name:en"~"..."]` ตามที่ requirements.md อนุญาตไว้เป็นทางเลือกที่สองแทน
+  - ต้องแนบ custom `User-Agent` header ด้วย (เหมือน Nominatim, T68) — ไม่ใช่แค่มารยาท แต่ overpass-api.de คืน **HTTP 406** ให้ `fetch` เปล่าๆ ที่ไม่มี `Accept`/`User-Agent` header จริงในทางปฏิบัติ (พบระหว่าง dev, แก้แล้ว)
+  - เขียนผลลัพธ์แบบ **incremental** (เขียนไฟล์ output ใหม่ทุกจังหวัด ไม่ใช่ครั้งเดียวตอนจบ) พร้อม resume support (ข้ามจังหวัดที่ status `ok` แล้วจาก run ก่อนหน้าที่ output path เดียวกัน) — เพิ่มเข้ามาหลังจากเจอปัญหาจริงตอน T61 (ดูด้านล่าง)
+- [x] T61 — รันสคริปต์จริงกับ `overpass-api.de` **สำเร็จบางส่วน** — ดูหัวข้อ "ผลของ T61" ด้านล่าง
+- [x] T62 — ไฟล์: `src/data/thailand-landmarks.ts` — เพิ่ม `lat?: number; lng?: number` บน `Landmark` interface (optional ถาวรตามคำตัดสิน PM ข้อ 14)
+- [x] T63 — ไฟล์: `src/data/thailand-landmarks.ts` — backfill พิกัดให้ landmark ทั้ง 29 แห่งของ 8 จังหวัดนำร่องเดิม โดยยิง Nominatim query ทีละรายการจริง (1 req/sec, ดูรายละเอียดวิธีด้านล่าง) **`id` เดิมทุกตัวไม่เปลี่ยนแปลง**
+- [x] T64 — ไฟล์: `scripts/merge-landmarks.ts` (dev-only, รันครั้งเดียวเพื่อ merge เข้า `src/data/thailand-landmarks.ts` จริง) — merge ผลจาก T61 เข้า 37 จังหวัดที่ query สำเร็จ (178 landmark) โดย **ปฏิเสธ merge เข้าจังหวัดใดๆ ที่มี landmark อยู่แล้ว** (`existingProvinceIds` guard) เป็น safety net อีกชั้นนอกเหนือจาก `--only-missing` ของ T60 เอง
+- [x] T65 — Regression check ผ่าน (ดูหัวข้อด้านล่าง) — แก้ 2 integration test ที่เคยใช้ `amnat-charoen` เป็นตัวอย่าง "จังหวัดไม่มี landmark" (`landmarkCheckin.test.tsx`, `addEntryLandmark.test.tsx`) เพราะตอนนี้มันมีข้อมูลจริงจาก T61 แล้ว — เปลี่ยนไปใช้ `chaiyaphum` แทน (ยืนยันแล้วว่า Overpass คืนผลลัพธ์ 0 แห่งจริงๆ ไม่ใช่ network gap จาก `scripts/output/overpass-landmarks-report.json`)
+- [x] T66 — ไฟล์: `src/sync/landmarkSeedSync.ts` (+ test) — schema `landmarks` (`id`,`province_id`,`name_th`,`lat`,`lng`,`updated_at`) เป็น comment DDL ในไฟล์ (ไม่มี migrations/ dir ในโปรเจกต์นี้) + `seedLandmarksToSupabase()` upsert ข้อมูล local ทั้งหมดขึ้น Supabase แบบ one-directional (ไม่มีการดึงกลับ เพราะ landmark เป็น static bundled dataset ไม่ใช่ user data) ผูกเข้า `runSyncCycle()` เดิมของ T39 ให้รันอัตโนมัติทุกรอบ sync
+- [x] T67 — ไฟล์: `src/utils/landmarkMap.ts` (+ test, pure geometry) + `src/components/LandmarkMap.tsx` (+ test) — วาดด้วย `react-native-svg` ตามสูตร normalize ของ design-spec เป๊ะ (padding 12%, y-flip, degenerate bbox → กึ่งกลาง) ผูกเข้า `LandmarkList.tsx` ระหว่าง heading กับ progress indicator ตามลำดับที่ design-spec กำหนด ใช้ callback `onToggle` เดียวกับ `LandmarkListItem` (landmark id อ้างอิงตรงกันเสมอ)
+- [x] T68 — ไฟล์: `src/lib/nominatimClient.ts` (+ test) — custom User-Agent, throttle 1 req/sec (queue แบบ serialize ผ่าน promise chain กันคำขอถี่กว่าที่กำหนดแม้เรียกพร้อมกัน), timeout 8s, error ทุกแบบ (offline/HTTP error/malformed) รวมเป็น `NominatimSearchError` เดียว
+- [x] T69 — ไฟล์: `src/types/entry.ts`, `src/storage/db.ts`, `src/storage/__mocks__/db.ts` — เพิ่มคอลัมน์ `placeLat`/`placeLng` (nullable REAL) แบบ non-destructive (`ensureColumn`) เหมือน pattern เดิมของ T34
+- [x] T70/T71 — ไฟล์: `src/hooks/useNominatimSearch.ts` (+ test), `src/components/SearchPlaceField.tsx`, `src/components/SearchResultItem.tsx`, `src/components/SearchResultConfirmationChip.tsx`, wiring ใน `src/screens/AddEntryScreen.tsx` — เลือกผลลัพธ์ prefill เฉพาะ `title` + แนบ `placeLat`/`placeLng` เท่านั้น ไม่สร้าง Landmark ไม่ auto check-in (แยก state `selectedPlace` ออกจาก `selectedLandmarkId` โดยสมบูรณ์ในโค้ด, ทดสอบยืนยันด้วย `addEntrySearchPlace.test.tsx`)
+- [x] T72 — Debounce 1000ms ใน hook (`useNominatimSearch`, UI layer) + throttle 1 req/sec ใน client module (`nominatimClient.ts`) เป็นคนละชั้นตามที่ task ระบุ (2 ชั้นป้องกันซ้อนกัน)
+- [x] T73 — ไฟล์: `src/components/SearchPlaceField.tsx` — states idle/typing/loading/results/empty/error inline ทั้งหมดตาม design-spec, error message เดียวกันสำหรับทุกสาเหตุ (offline/timeout/fail) ตามที่ design-spec ข้อ D ระบุไว้แล้วว่าไม่ต้องแยก
+- [x] T74 — Failure isolation: `useNominatimSearch` catch ทุก error เองภายใน ไม่มี throw ใดๆ หลุดไปถึง `AddEntryScreen`; ทดสอบยืนยันด้วย integration test "a totally broken search never blocks manually typing the title and saving normally"
+
+### ผลของ T61 (รันสคริปต์จริงกับ Overpass API)
+
+**รันจริงสำเร็จบางส่วน** — ไม่ใช่ mock/fallback data ตามที่ PM อนุญาตไว้เป็นทางเลือกสำรอง เพราะสภาพแวดล้อมนี้มี outbound network access ไปยัง `overpass-api.de` จริง (ยืนยันด้วย `curl https://overpass-api.de/api/status` → HTTP 200 ก่อนเริ่ม):
+
+- รันจริงได้ **45/76 จังหวัด** ที่มีข้อมูล landmark (8 จังหวัดนำร่องเดิม + 37 จังหวัดใหม่จาก Overpass) รวม **207 landmark** (29 เดิม + 178 ใหม่)
+- ระหว่างรัน (query ทีละจังหวัด หน่วง 1.2 วินาที + retry 1 ครั้งเมื่อ fail ตามที่ AC กำหนด) เจอ `HTTP 429` (rate limit) เป็นระยะหลังจากผ่านไปราว 50 จังหวัด แล้วสุดท้ายกลายเป็น connection failure เต็มรูปแบบ (`fetch failed`, ยืนยันด้วย `curl` แยกว่า `overpass-api.de` ไม่ตอบสนองอีกต่อไปในขณะที่ host อื่น เช่น nominatim.openstreetmap.org และ google.com ยังใช้งานได้ปกติ) — สรุปว่า public Overpass instance บล็อก/limit ทราฟฟิกจาก IP นี้ชั่วคราวหลังใช้งานหนักต่อเนื่อง (ตรงกับ fair-use policy ของ Overpass) ไม่ใช่ปัญหาโค้ดของสคริปต์
+- **หยุดการรันเอง** (kill process) แทนที่จะรอ timeout ของทุกจังหวัดที่เหลือ (ซึ่งจะกิน ~35 วิ×2 attempt ต่อจังหวัด ≈ มากกว่า 15 นาทีเปล่าๆ) ตามคำสั่ง PM ที่ให้ "อย่าเสียเวลาลองซ้ำหลายรอบ" — ข้อมูลที่ได้แล้ว 45/76 จังหวัดไม่เสียหาย (ไฟล์ output เขียนแบบ incremental ทุกจังหวัด)
+- จังหวัดที่**ยังไม่ได้ข้อมูล** แยกเป็น 2 กลุ่มใน `scripts/output/overpass-landmarks-report.json`:
+  1. `request-failed` (16 จังหวัด — เกิดจาก rate-limit/network ระหว่างรัน ไม่ใช่ความล้มเหลวถาวร): Chachoengsao, Nan, Phichit, Ranong, Ratchaburi, Rayong, Roi Et, Sa Kaeo, Sakon Nakhon, Samut Prakan, Samut Sakhon, Samut Songkhram, Saraburi, Satun, Si Sa Ket, Sing Buri
+  2. ยังไม่เคย query เลย (13 จังหวัด, หยุดก่อนถึงคิว): Songkhla, Suphan Buri, Surat Thani, Surin, Tak, Trang, Trat, Ubon Ratchathani, Udon Thani, Uthai Thani, Uttaradit, Yala, Yasothon
+  3. Overpass คืนผลลัพธ์ **0 แห่งจริง** (ไม่ใช่ network gap, สถานะ `empty`): Chaiyaphum, Pattani
+  4. ได้ไม่ครบ 3 แห่ง (สถานะ `partial`): Nakhon Phanom (ได้ 2 แห่ง)
+- **ผู้ใช้ต้องรันสคริปต์เองภายหลัง** (แนะนำรอ ~10-30 นาทีให้ rate-limit ของ Overpass reset ก่อน) ด้วยคำสั่ง:
+  ```
+  node scripts/extract-overpass-landmarks.ts --only-missing
+  node scripts/merge-landmarks.ts
+  ```
+  สคริปต์ทั้งสองรองรับการรันซ้ำได้ปลอดภัย — `extract-overpass-landmarks.ts` resume อัตโนมัติ (ข้ามจังหวัดที่ `ok` แล้วใน `scripts/output/overpass-landmarks-report.json`) และ `merge-landmarks.ts` ปฏิเสธ merge ซ้ำเข้าจังหวัดที่มีข้อมูลอยู่แล้วเสมอ (ทั้ง pilot 8 และ 37 ที่ merge ไปแล้วรอบนี้) จึงรันซ้ำกี่ครั้งก็ไม่พังข้อมูลเดิม
+
+### T63 — วิธี backfill พิกัดจังหวัดนำร่อง (รายละเอียด)
+
+ยิง Nominatim search (`https://nominatim.openstreetmap.org/search?format=json&countrycodes=th&...`) ทีละ landmark จริง (29 รายการ, หน่วง ~1.1 วินาทีต่อคำขอ) ด้วยสคริปต์ scratch ชั่วคราว (ไม่ได้ commit เข้าโปรเจกต์ เพราะเป็น one-time lookup ไม่ใช่ tool ที่ต้องรันซ้ำ) ผลลัพธ์ที่ผิดที่ 2 รายการถูกแก้ด้วยการปรับคำค้นเป็นภาษาอังกฤษให้เจาะจงขึ้น:
+- "วัดร่องขุ่น" (White Temple) คำค้นภาษาไทยตรงๆ แมตช์ผิดไปที่วัดเก่าคนละที่ (`วัดอินทราราม(วัดร่องขุ่นเก่า)`) — แก้ด้วยคำค้น "Wat Rong Khun White Temple Chiang Rai"
+- "เมืองเก่าเชียงใหม่" คำค้นภาษาไทยแมตช์ผิดไปที่ร้านอาหารในขอนแก่น — แก้ด้วยคำค้น "Old City, Chiang Mai, Thailand"
+
+`kbi-four-islands` ("ทัวร์ 4 เกาะกระบี่") เป็น multi-island boat tour ไม่มีพิกัดเดียวจริงๆ — ยึดพิกัดเกาะปอดะ (Koh Poda) ซึ่งเป็นจุดที่รู้จักมากที่สุด/อยู่กลางทัวร์เป็นตัวแทน (comment ไว้ในโค้ดแล้ว)
+
+### T65 — Regression check รายละเอียด
+
+ยืนยันว่า US-8/US-9/US-10 เดิมยังทำงานถูกต้องกับ dataset ที่ขยายแล้ว:
+- `src/utils/landmarkDerived.ts`/`.test.ts` (T36) อ่านแค่ `id`/`provinceId`/checkins record — ไม่แตะ `lat`/`lng` เลย ไม่มีผลกระทบ
+- `LandmarkList`/`LandmarkListItem`/`EmptyStateLandmarks` (T43/T45) อ่านแค่ `id`/`nameTh` — ทำงานเหมือนเดิมทั้งกับ landmark ที่มี/ไม่มีพิกัด
+- `ProvinceMasterBadge` (T46) คำนวณจาก `getLandmarkProgress`/`isProvinceMaster` เดิม — ไม่เปลี่ยน logic เลย จำนวน landmark ที่เพิ่มขึ้นต่อจังหวัด (สูงสุด 5 แทน 3-5 เดิม) ไม่กระทบสูตรคำนวณ (ยังเป็น `checkedInCount === totalCount`)
+- `AddEntryScreen` landmark chip field (T47/T48) อ่านจาก `getLandmarksForProvince()` เหมือนเดิม
+- พบ 2 integration test ที่ผูกกับ "amnat-charoen = ไม่มีข้อมูล" ตายตัว (เขียนไว้ตั้งแต่รอบก่อนตอนที่มีแค่ 8 จังหวัดนำร่อง) — แก้แล้ว (ดูด้านบน) เพราะเป็น assumption ที่ล้าสมัยไปแล้วหลัง T61/T64 ไม่ใช่ regression จริงของโค้ด
+- ผลลัพธ์สุดท้าย: `npx jest` ทั้งโปรเจกต์ **32 suites ผ่านหมด, 186 passed + 1 skip (เดิม) = 187 total**, `npx tsc --noEmit` ผ่านสะอาด
+
+## การตัดสินใจทางเทคนิค (รอบ 3)
+
+1. **Overpass area resolution ด้วย normalized `name:en` matching + bulk query เดียว** แทนการยิง `area["name"="จังหวัด..."]` เป็นภาษาไทยทีละจังหวัดตามตัวอย่างใน requirements.md ตรงๆ — เพราะทดสอบจริงแล้วพบว่า query ภาษาไทยผ่าน `curl -d` ไม่เสถียร (แมตช์ไม่เจอบ่อยครั้งแม้ relation จะมีอยู่จริง เป็นไปได้ว่าเกี่ยวกับการ index/encoding ฝั่ง Overpass) ในขณะที่ `name:en` แมตช์ได้ชัดเจนและ derive ได้ตรงจาก `nameEn` ที่มีอยู่แล้วใน `thailand-provinces.ts` โดยไม่ต้องสร้าง mapping table ISO3166-2 เพิ่มเติม (ทดสอบ ISO3166-2 ไว้แล้วเหมือนกัน ใช้ได้แต่ต้องมี mapping table 76 แถวเพิ่ม ซึ่งเป็นข้อมูลอีกชุดที่ต้องดูแล)
+2. **แยก script T60 (extraction) ออกจาก script T64 (merge)** อย่างเด็ดขาดเป็น 2 ไฟล์ (`extract-overpass-landmarks.ts`, `merge-landmarks.ts`) — extraction เขียนออกเป็น JSON กลางก่อนเสมอ ไม่เคยแก้ `thailand-landmarks.ts` ตรงๆ เอง ตามที่ T60 AC กำหนดไว้ชัดเจน ("ยังไม่ทับ thailand-landmarks.ts โดยตรง ให้ T64 เป็นคนรวมภายหลัง") — แยกความรับผิดชอบยังทำให้รัน extraction ซ้ำ (retry จังหวัดที่เหลือ) ได้อิสระโดยไม่กระทบไฟล์ dataset จริงจนกว่าจะพร้อม merge จริง
+3. **Incremental file write + resume-by-report** ถูกเพิ่มเข้าไปหลังจากรันจริงครั้งแรกพัง (ใช้ `timeout 500` ระดับ shell ครอบ `node` ไว้ ทำให้ process ถูก kill ก่อนถึงบรรทัด `fs.writeFileSync` ท้ายสุด สูญเสียงานที่ query สำเร็จไปแล้วทั้งหมดโดยไม่มีไฟล์เหลือเลย) — บทเรียน: build-time script ที่ทำ I/O จำนวนมากต้อง persist progress กันเอง ไม่ใช่พึ่ง exit ปกติของ process เท่านั้น เพิ่มแล้วและพิสูจน์แล้วว่าใช้งานได้จริงตอนรันจริงรอบสอง (ข้อมูลที่ query ได้ก่อนโดนบล็อกไม่หายไปเลย)
+4. **`allowImportingTsExtensions: true` + `"types": ["jest", "node"]` ใน `tsconfig.json`** (แก้ไฟล์ config, ไม่ใช่เอกสาร requirements/tasks/design-spec) — จำเป็นเพราะ `scripts/*.ts` รันตรงด้วย `node` (Node 22.6+ native TS stripping) ซึ่งต้องการ explicit `.ts` extension บน relative import (กฎ ESM resolution) แต่ TypeScript ปกติ reject extension แบบนี้เว้นแต่เปิด flag นี้ — และ `@types/node` มีอยู่แล้วใน `node_modules` (ติดมาจาก dependency อื่น) แค่ไม่เคยถูกเปิดใช้ผ่าน `types` array เท่านั้น ไม่ต้องติดตั้งอะไรเพิ่ม, ไม่กระทบ runtime ของแอป (`noEmit: true` อยู่แล้ว)
+5. **`landmarks` table เป็น one-directional seed เท่านั้น** (local → Supabase, ไม่มีขาดึงกลับ) ต่างจาก entries/landmark_checkins ที่เป็น bidirectional LWW (T39/T40) — เพราะ `LANDMARKS` เป็น static bundled array ที่ compile เข้าแอปตั้งแต่ build time ไม่ใช่ user-generated data ที่มีหลายเครื่อง/หลาย session เขียนแข่งกัน จึงไม่มี "conflict" ให้ resolve; ผูกเข้า `runSyncCycle()` เดิมเพื่อให้ seed อัตโนมัติทุกครั้งที่มีการ sync โดยไม่ต้องมี trigger แยก
+6. **`useNominatimSearch` เป็น custom hook แยกจาก UI component** (ไม่ inline logic ใน `AddEntryScreen`/`SearchPlaceField` ตรงๆ) — เพื่อให้ debounce/state-machine/race-guard (stale request ไม่ overwrite ผลล่าสุด) ทดสอบได้อิสระด้วย `renderHook` โดยไม่ต้อง mount ทั้งฟอร์ม ซึ่งพบว่าจำเป็นจริงระหว่างเขียนเทส (`@testing-library/react-native` v14 `renderHook`/`render` คืน `Promise` ต้อง `await` เสมอ — ถ้าไม่ await `result.current` จะเป็น `undefined` ทันที ไม่ throw ชัดเจน เสียเวลา debug พอสมควรกว่าจะเจอ ด้วยการทดสอบแยก hook เปล่าๆ)
+7. **Confirmation chip label ใช้ entry.title เป็น fallback ตอน edit mode** (ไม่ได้เก็บ Nominatim `display_name` เต็มไว้ใน DB เพราะ schema/AC ไม่ได้ขอ) — เมื่อเปิดแก้ไข entry ที่เคยมี `placeLat`/`placeLng` มาก่อน จะโชว์ chip ด้วยข้อความ title ปัจจุบันแทน "อ้างอิงพิกัดจาก: ..." เต็มรูปแบบ — เป็นส่วนเสริมนอกเหนือ design-spec เดิม (ซึ่งเขียนเฉพาะ create-flow) ทำเพื่อไม่ให้ผู้ใช้ล้าง metadata พิกัดเดิมไม่ได้ตอนแก้ไข entry
+
+## Tests เขียนเพิ่มในรอบ 3
+
+- `scripts/extract-overpass-landmarks.test.ts` — 15 tests: normalize/area-matching, select-top-landmarks (dropped no-coords/no-Thai-name, de-dup, tag priority + cap), report status, query builder — ทั้งหมด mock data ไม่แตะ network
+- `src/utils/landmarkMap.test.ts` — bounding box, normalize formula (4 มุม+กึ่งกลาง), degenerate bbox 3 เคส (lat เท่ากัน/lng เท่ากัน/ทั้งคู่)
+- `src/components/LandmarkMap.test.tsx` — จุด+label ตรงกับ list, toggle callback contract, กรอง no-coords ออกแต่ไม่ error, no-points fallback message
+- `src/lib/nominatimClient.test.ts` — min length guard, custom User-Agent header, mapping/short-label, malformed-row filtering, HTTP error, offline error, malformed response, throttle spacing ≥1000ms (real-time test)
+- `src/hooks/useNominatimSearch.test.ts` — 9 tests: idle/typing/debounce timing, re-type resets debounce, results cap 5, empty, error (ไม่ leak throw), retry, reset, stale-request race guard
+- `src/sync/landmarkSeedSync.test.ts` — row mapping (lat/lng optional→null), upsert เมื่อ configured, graceful no-op เมื่อไม่ configured, ไม่ throw เมื่อ upsert fail
+- `src/__tests__/integration/addEntrySearchPlace.test.tsx` — 7 end-to-end tests ผ่าน `AddEntryScreen` จริง: debounce→results→select→prefill+chip+save พร้อม placeLat/placeLng, ไม่สร้าง Landmark/ไม่ auto-checkin, ปุ่ม "×" ล้างเฉพาะพิกัดไม่แตะ title, error+retry, empty state, **failure isolation** (ค้นหาพังสนิทแต่ยังกรอก title เองแล้วบันทึกได้ปกติ), ไม่ใช้ช่องค้นหาเลยก็ไม่กระทบ
+
+รวม: `npx jest` ทั้งโปรเจกต์ **32 suites ผ่านหมด, 187 tests (186 passed + 1 skip เดิม)**, `npx tsc --noEmit` ผ่านสะอาด
+
+## จุดที่ทำไม่ได้ตาม spec 100% (รอบ 3) / ต้องการให้ PM ทราบ
+
+1. **T61 ยังไม่ครบ 76 จังหวัด** — ได้ข้อมูลจริง 45/76 จังหวัด (8 เดิม + 37 ใหม่) ก่อนโดน Overpass public instance จำกัด/บล็อกทราฟฟิกชั่วคราว (ดูรายละเอียดเต็มด้านบน) — **ผู้ใช้ต้องรันสคริปต์ต่อเองภายหลัง** ด้วย `node scripts/extract-overpass-landmarks.ts --only-missing` แล้ว `node scripts/merge-landmarks.ts` เมื่อ rate-limit reset (ไม่มี ETA แน่นอน เป็นนโยบายฝั่ง Overpass) — สคริปต์ resume ได้เองไม่ต้องเริ่มใหม่ทั้งหมด ตามที่ PM decision ประเด็น 13 ระบุไว้ล่วงหน้าแล้วว่าเป็นความเสี่ยงที่ยอมรับได้ของรอบนี้ (T61 เป็น P1 ไม่ใช่ P0)
+2. **T75 (ผนวก checklist จังหวัดข้อมูลไม่ครบเข้า T59) ไม่ได้สร้างเป็นเอกสารแยก** — ตาม PM scope ที่ระบุว่า T75 เป็น P2/optional และ T59 (ที่ควรผนวกเข้า) เองก็ยังไม่มีไฟล์อยู่จริงในโปรเจกต์ (เป็นงาน content-process ล้วนๆ นอก sprint) — รายชื่อจังหวัดที่ต้อง manual review ครบถ้วนอยู่ใน `scripts/output/overpass-landmarks-report.json` แล้ว (field `status`) ซึ่งเป็น machine-readable ทำหน้าที่เดียวกับ checklist ได้ทันที ทีม content สามารถ query ไฟล์นี้ได้ตรงๆ โดยไม่ต้อง maintain เอกสารซ้ำสอง
+3. ทุกอย่างอื่นใน P0 (T60, T62-T74) ทำครบตาม spec แล้ว ไม่มีการตัดฟีเจอร์ทิ้งเอง

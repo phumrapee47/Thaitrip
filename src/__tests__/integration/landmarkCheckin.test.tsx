@@ -37,7 +37,11 @@ describe('Landmark check-in on ProvinceDetailScreen (US-8/US-9)', () => {
   });
 
   it('shows the not-curated empty state for a province with no seeded landmarks (US-8 AC4)', async () => {
-    await render(<TestApp provinceId="amnat-charoen" />);
+    // chaiyaphum: confirmed empty in scripts/output/overpass-landmarks-report.json
+    // (T60/T61 real Overpass run legitimately returned 0 results for it — not a
+    // network-failure gap). amnat-charoen is no longer a valid example here since
+    // T64 merged real landmarks into it.
+    await render(<TestApp provinceId="chaiyaphum" />);
     await waitFor(() =>
       expect(screen.getByText('ยังไม่มีข้อมูลสถานที่แนะนำสำหรับจังหวัดนี้')).toBeTruthy()
     );

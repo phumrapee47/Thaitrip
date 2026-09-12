@@ -4,6 +4,7 @@ import { getLandmarksForProvince } from '../data/thailand-landmarks';
 import { getLandmarkProgress } from '../utils/landmarkDerived';
 import LandmarkListItem from './LandmarkListItem';
 import LandmarkProgressIndicator from './LandmarkProgressIndicator';
+import LandmarkMap from './LandmarkMap';
 import EmptyStateLandmarks from './EmptyStateLandmarks';
 import { COLORS } from '../theme';
 
@@ -42,6 +43,8 @@ export default function LandmarkList({ provinceId, checkins, loading, onToggle }
   return (
     <View style={styles.container}>
       <Text style={styles.heading}>สถานที่แนะนำ</Text>
+      {/* T67 / US-18: order fixed by design-spec — heading -> map -> progress -> list, never reordered. */}
+      <LandmarkMap landmarks={landmarks} checkins={checkins} onToggle={onToggle} />
       <LandmarkProgressIndicator checkedInCount={progress.checkedInCount} totalCount={progress.totalCount} />
       {landmarks.map((landmark) => (
         <LandmarkListItem

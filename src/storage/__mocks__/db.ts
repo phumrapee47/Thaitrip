@@ -30,13 +30,19 @@ export async function createEntry(entry: NewJournalEntry): Promise<JournalEntry>
     syncedAt: entry.syncedAt ?? null,
     cloudId: entry.cloudId ?? null,
     retryCount: entry.retryCount ?? 0,
+    placeLat: entry.placeLat ?? null,
+    placeLng: entry.placeLng ?? null,
   };
   store.push(created);
   return created;
 }
 
 export async function updateEntry(id: string, entry: NewJournalEntry): Promise<void> {
-  store = store.map((e) => (e.id === id ? { ...e, ...entry, updatedAt: nowIso() } : e));
+  store = store.map((e) =>
+    e.id === id
+      ? { ...e, ...entry, updatedAt: nowIso(), placeLat: entry.placeLat ?? null, placeLng: entry.placeLng ?? null }
+      : e
+  );
 }
 
 export async function deleteEntry(id: string): Promise<void> {

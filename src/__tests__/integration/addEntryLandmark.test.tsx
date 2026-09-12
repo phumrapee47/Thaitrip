@@ -34,7 +34,10 @@ describe('AddEntryScreen landmark field (US-10)', () => {
   });
 
   it('hides the landmark field entirely for a province with no seeded landmarks (US-10 AC2 / flow step 5)', async () => {
-    await render(<TestApp provinceId="amnat-charoen" />);
+    // chaiyaphum: confirmed empty in scripts/output/overpass-landmarks-report.json
+    // (T60/T61). amnat-charoen is no longer a valid example — T64 merged real
+    // landmarks into it.
+    await render(<TestApp provinceId="chaiyaphum" />);
     await waitFor(() => expect(screen.getByText('ชื่อสถานที่ *')).toBeTruthy());
     expect(screen.queryByText('เช็คอินสถานที่ (ถ้ามี)')).toBeNull();
   });

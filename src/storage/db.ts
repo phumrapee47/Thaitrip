@@ -38,7 +38,9 @@ function getDb(): Promise<SQLite.SQLiteDatabase> {
           updatedAt TEXT NOT NULL DEFAULT '',
           syncedAt TEXT,
           cloudId TEXT,
-          retryCount INTEGER NOT NULL DEFAULT 0
+          retryCount INTEGER NOT NULL DEFAULT 0,
+          placeLat REAL,
+          placeLng REAL
         );
         CREATE INDEX IF NOT EXISTS idx_entries_provinceId ON entries(provinceId);
 
@@ -66,6 +68,10 @@ function getDb(): Promise<SQLite.SQLiteDatabase> {
       await ensureColumn(db, 'entries', 'syncedAt', 'TEXT');
       await ensureColumn(db, 'entries', 'cloudId', 'TEXT');
       await ensureColumn(db, 'entries', 'retryCount', 'INTEGER NOT NULL DEFAULT 0');
+      // T69 / US-19 AC3: Nominatim search-result metadata, added the same
+      // non-destructive way as the T34 columns above.
+      await ensureColumn(db, 'entries', 'placeLat', 'REAL');
+      await ensureColumn(db, 'entries', 'placeLng', 'REAL');
       return db;
     });
   }
@@ -92,6 +98,8 @@ type EntryRow = {
   syncedAt: string | null;
   cloudId: string | null;
   retryCount: number | null;
+  placeLat: number | null;
+  placeLng: number | null;
 };
 
 function rowToEntry(row: EntryRow): JournalEntry {
@@ -107,6 +115,8 @@ function rowToEntry(row: EntryRow): JournalEntry {
     syncedAt: row.syncedAt ?? null,
     cloudId: row.cloudId ?? null,
     retryCount: row.retryCount ?? 0,
+    placeLat: row.placeLat ?? null,
+    placeLng: row.placeLng ?? null,
   };
 }
 
@@ -125,7 +135,7 @@ export async function createEntry(entry: NewJournalEntry): Promise<JournalEntry>
   const id = generateId();
   const updatedAt = entry.updatedAt ?? nowIso();
   await db.runAsync(
-    `INSERT INTO entries (id, provinceId, date, title, notes, photoUris, tags, updatedAt, syncedAt, cloudId, retryCount) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO entries (id, provinceId, date, title, notes, photoUris, tags, updatedAt, syncedAt, cloudId, retryCount, placeLat, placeLng) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     id,
     entry.provinceId,
     entry.date,
@@ -136,9 +146,20 @@ export async function createEntry(entry: NewJournalEntry): Promise<JournalEntry>
     updatedAt,
     entry.syncedAt ?? null,
     entry.cloudId ?? null,
-    entry.retryCount ?? 0
+    entry.retryCount ?? 0,
+    entry.placeLat ?? null,
+    entry.placeLng ?? null
   );
-  return { id, ...entry, updatedAt, syncedAt: entry.syncedAt ?? null, cloudId: entry.cloudId ?? null, retryCount: entry.retryCount ?? 0 };
+  return {
+    id,
+    ...entry,
+    updatedAt,
+    syncedAt: entry.syncedAt ?? null,
+    cloudId: entry.cloudId ?? null,
+    retryCount: entry.retryCount ?? 0,
+    placeLat: entry.placeLat ?? null,
+    placeLng: entry.placeLng ?? null,
+  };
 }
 
 /** Update an existing entry by id (T28). Always bumps updatedAt (T40 last-write-wins
@@ -146,7 +167,7 @@ export async function createEntry(entry: NewJournalEntry): Promise<JournalEntry>
 export async function updateEntry(id: string, entry: NewJournalEntry): Promise<void> {
   const db = await getDb();
   await db.runAsync(
-    `UPDATE entries SET provinceId = ?, date = ?, title = ?, notes = ?, photoUris = ?, tags = ?, updatedAt = ? WHERE id = ?`,
+    `UPDATE entries SET provinceId = ?, date = ?, title = ?, notes = ?, photoUris = ?, tags = ?, updatedAt = ?, placeLat = ?, placeLng = ? WHERE id = ?`,
     entry.provinceId,
     entry.date,
     entry.title,
@@ -154,6 +175,8 @@ export async function updateEntry(id: string, entry: NewJournalEntry): Promise<v
     JSON.stringify(entry.photoUris ?? []),
     JSON.stringify(entry.tags ?? []),
     nowIso(),
+    entry.placeLat ?? null,
+    entry.placeLng ?? null,
     id
   );
 }

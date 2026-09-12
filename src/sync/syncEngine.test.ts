@@ -262,6 +262,7 @@ describe('runSyncCycle', () => {
     expect(result).toEqual({
       entries: { attempted: 0, synced: 0, failed: 0 },
       checkins: { attempted: 0, synced: 0, failed: 0 },
+      landmarks: { attempted: 0, synced: 0, failed: false },
     });
   });
 });

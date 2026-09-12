@@ -1,6 +1,7 @@
 import * as db from '../storage/db';
 import { getSupabaseClient } from '../lib/supabaseClient';
 import { pickWinner } from '../utils/syncStatus';
+import { seedLandmarksToSupabase, type LandmarkSeedResult } from './landmarkSeedSync';
 import type { JournalEntry } from '../types/entry';
 import type { LandmarkCheckin } from '../types/landmark';
 
@@ -193,12 +194,18 @@ export async function syncPendingCheckins(): Promise<SyncResult> {
 export interface SyncCycleResult {
   entries: SyncResult;
   checkins: SyncResult;
+  /** T66: local `thailand-landmarks.ts` -> Supabase `landmarks` table seed pass. */
+  landmarks: LandmarkSeedResult;
 }
 
-/** T39: one full opportunistic sync pass, safe to call repeatedly/on an interval
- * (idempotent per-record thanks to pending detection). Never blocks the UI thread
- * beyond normal async/await (no synchronous long-running work). */
+/** T39/T66: one full opportunistic sync pass, safe to call repeatedly/on an interval
+ * (idempotent per-record thanks to pending detection / upsert-by-id). Never blocks the
+ * UI thread beyond normal async/await (no synchronous long-running work). */
 export async function runSyncCycle(): Promise<SyncCycleResult> {
-  const [entries, checkins] = await Promise.all([syncPendingEntries(), syncPendingCheckins()]);
-  return { entries, checkins };
+  const [entries, checkins, landmarks] = await Promise.all([
+    syncPendingEntries(),
+    syncPendingCheckins(),
+    seedLandmarksToSupabase(),
+  ]);
+  return { entries, checkins, landmarks };
 }

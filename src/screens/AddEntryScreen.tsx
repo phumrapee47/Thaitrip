@@ -22,7 +22,17 @@ import { getLandmarksForProvince } from '../data/thailand-landmarks';
 import { formatThaiDate } from '../utils/derived';
 import PhotoPicker from '../components/PhotoPicker';
 import TagSelector from '../components/TagSelector';
+import SearchPlaceField from '../components/SearchPlaceField';
+import SearchResultConfirmationChip from '../components/SearchResultConfirmationChip';
+import { useNominatimSearch } from '../hooks/useNominatimSearch';
+import type { NominatimResult } from '../lib/nominatimClient';
 import { COLORS } from '../theme';
+
+interface SelectedPlace {
+  lat: number;
+  lng: number;
+  label: string;
+}
 
 type Props = NativeStackScreenProps<RootStackParamList, 'AddEntry'>;
 
@@ -49,6 +59,11 @@ export default function AddEntryScreen({ route, navigation }: Props) {
   const [photoUris, setPhotoUris] = useState<string[]>(existingEntry?.photoUris ?? []);
   const [tags, setTags] = useState<string[]>(existingEntry?.tags ?? []);
   const [selectedLandmarkId, setSelectedLandmarkId] = useState<string | null>(null);
+  // T69/T71 / US-19 AC3-4: Nominatim search metadata — entirely separate from
+  // selectedLandmarkId above (PM decision ประเด็น 11: never creates a Landmark,
+  // never auto checks-in).
+  const [selectedPlace, setSelectedPlace] = useState<SelectedPlace | null>(null);
+  const placeSearch = useNominatimSearch();
 
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [titleError, setTitleError] = useState<string | null>(null);
@@ -63,9 +78,33 @@ export default function AddEntryScreen({ route, navigation }: Props) {
       setNotes(existingEntry.notes);
       setPhotoUris(existingEntry.photoUris);
       setTags(existingEntry.tags);
+      // Restore the confirmation chip when editing an entry that already has
+      // attached place metadata. There's no stored Nominatim display name to
+      // show (only lat/lng were persisted), so the entry's own title is used
+      // as the chip label — a reasonable fallback for the edit flow, which
+      // design-spec doesn't explicitly cover (it only walks through the
+      // create flow).
+      if (typeof existingEntry.placeLat === 'number' && typeof existingEntry.placeLng === 'number') {
+        setSelectedPlace({ lat: existingEntry.placeLat, lng: existingEntry.placeLng, label: existingEntry.title });
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [existingEntry?.id]);
+
+  function handleSelectPlaceResult(result: NominatimResult) {
+    // T71: prefill title (overwrites any existing value, user can still edit
+    // it afterwards) + attach lat/lng as metadata only — never touches
+    // selectedLandmarkId/landmark check-in state.
+    setTitle(result.shortLabel);
+    setSelectedPlace({ lat: result.lat, lng: result.lng, label: result.shortLabel });
+    placeSearch.reset(); // design-spec: field collapses back to empty, dropdown closes
+  }
+
+  function handleClearSelectedPlace() {
+    // design-spec Search Result Confirmation Chip: clears ONLY the attached
+    // metadata — the title text the user sees/edited stays exactly as-is.
+    setSelectedPlace(null);
+  }
 
   function validate(): boolean {
     let valid = true;
@@ -88,7 +127,16 @@ export default function AddEntryScreen({ route, navigation }: Props) {
     if (!validate()) return;
     setSaving(true);
     try {
-      const payload = { provinceId, date, title: title.trim(), notes, photoUris, tags };
+      const payload = {
+        provinceId,
+        date,
+        title: title.trim(),
+        notes,
+        photoUris,
+        tags,
+        placeLat: selectedPlace?.lat ?? null,
+        placeLng: selectedPlace?.lng ?? null,
+      };
       if (isEditMode && entryId) {
         await editEntry(entryId, payload);
       } else {
@@ -165,6 +213,21 @@ export default function AddEntryScreen({ route, navigation }: Props) {
             onChangeText={setTitle}
           />
           {titleError ? <Text style={styles.errorText}>{titleError}</Text> : null}
+
+          {/* T70/T71 / US-19, US-20: optional, fully independent from title's own
+              validation/error above — search failures never block save (T74). */}
+          {selectedPlace ? (
+            <SearchResultConfirmationChip label={selectedPlace.label} onClear={handleClearSelectedPlace} />
+          ) : (
+            <SearchPlaceField
+              query={placeSearch.query}
+              status={placeSearch.status}
+              results={placeSearch.results}
+              onChangeQuery={placeSearch.onChangeQuery}
+              onSelectResult={handleSelectPlaceResult}
+              onRetry={placeSearch.retry}
+            />
+          )}
 
           <Text style={styles.fieldLabel}>บันทึกความทรงจำ</Text>
           <TextInput
