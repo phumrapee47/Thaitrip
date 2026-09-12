@@ -1,0 +1,109 @@
+import React, { useState } from 'react';
+import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import type { LinkEmailResult } from '../auth/authService';
+import { MIN_PASSWORD_LENGTH } from '../auth/authService';
+import { COLORS } from '../theme';
+
+export interface EmailLinkFormProps {
+  onSubmit: (email: string, password: string) => Promise<LinkEmailResult>;
+  onSuccess: () => void;
+  onCancel: () => void;
+}
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** T49 (form) + T54 (server-error banner) / US-11 AC2/AC4. */
+export default function EmailLinkForm({ onSubmit, onSuccess, onCancel }: EmailLinkFormProps) {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [emailError, setEmailError] = useState<string | null>(null);
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [serverError, setServerError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  function validateClientSide(): boolean {
+    let valid = true;
+    if (!EMAIL_RE.test(email.trim())) {
+      setEmailError('รูปแบบอีเมลไม่ถูกต้อง');
+      valid = false;
+    } else {
+      setEmailError(null);
+    }
+    if (password.length < MIN_PASSWORD_LENGTH) {
+      setPasswordError(`รหัสผ่านต้องมีอย่างน้อย ${MIN_PASSWORD_LENGTH} ตัวอักษร`);
+      valid = false;
+    } else {
+      setPasswordError(null);
+    }
+    return valid;
+  }
+
+  async function handleSubmit() {
+    setServerError(null);
+    if (!validateClientSide()) return;
+    setSubmitting(true);
+    try {
+      const result = await onSubmit(email.trim(), password);
+      if (result.ok) {
+        onSuccess();
+      } else {
+        setServerError(result.message ?? 'เชื่อมต่อไม่สำเร็จ ลองใหม่อีกครั้ง');
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <View style={styles.container}>
+      {serverError ? (
+        <View style={styles.errorBanner}>
+          <Text style={styles.errorBannerText}>{serverError}</Text>
+        </View>
+      ) : null}
+
+      <Text style={styles.label}>อีเมล</Text>
+      <TextInput
+        style={styles.input}
+        placeholder="you@example.com"
+        autoCapitalize="none"
+        keyboardType="email-address"
+        value={email}
+        onChangeText={setEmail}
+      />
+      {emailError ? <Text style={styles.fieldError}>{emailError}</Text> : null}
+
+      <Text style={styles.label}>รหัสผ่าน</Text>
+      <TextInput style={styles.input} placeholder="อย่างน้อย 6 ตัวอักษร" secureTextEntry value={password} onChangeText={setPassword} />
+      {passwordError ? <Text style={styles.fieldError}>{passwordError}</Text> : null}
+
+      <Pressable style={[styles.submitButton, submitting && styles.submitButtonDisabled]} onPress={handleSubmit} disabled={submitting}>
+        {submitting ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.submitButtonText}>ผูกอีเมล</Text>}
+      </Pressable>
+      <Pressable style={styles.cancelButton} onPress={onCancel} disabled={submitting}>
+        <Text style={styles.cancelButtonText}>ยกเลิก</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { padding: 16, gap: 4 },
+  errorBanner: {
+    backgroundColor: '#FBEAEA',
+    borderColor: COLORS.danger,
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 12,
+  },
+  errorBannerText: { color: COLORS.danger, fontSize: 13 },
+  label: { fontSize: 13, fontWeight: '600', color: COLORS.textPrimary, marginTop: 12, marginBottom: 6 },
+  input: { borderWidth: 1, borderColor: '#D9D9D9', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15 },
+  fieldError: { fontSize: 12, color: COLORS.danger, marginTop: 4 },
+  submitButton: { marginTop: 24, backgroundColor: COLORS.accent, borderRadius: 8, paddingVertical: 14, alignItems: 'center' },
+  submitButtonDisabled: { opacity: 0.6 },
+  submitButtonText: { color: '#FFFFFF', fontWeight: '700', fontSize: 16 },
+  cancelButton: { marginTop: 12, alignItems: 'center', paddingVertical: 8 },
+  cancelButtonText: { color: COLORS.textSecondary, fontSize: 14 },
+});
