@@ -11,6 +11,7 @@ import { getLandmarkProgress, isProvinceMaster as computeIsProvinceMaster } from
 import HeaderProgress from '../components/HeaderProgress';
 import Map3D from '../components/Map3D';
 import Legend from '../components/Legend';
+import GlobalSearchBar from '../components/GlobalSearchBar';
 import { COLORS } from '../theme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Home'>;
@@ -88,6 +89,8 @@ export default function HomeScreen({ navigation }: Props) {
             </Pressable>
           </View>
         </View>
+
+        <GlobalSearchBar onSelectProvince={handlePressProvince} />
 
         <HeaderProgress unlockedCount={unlockedCount} loading={loading} />
 

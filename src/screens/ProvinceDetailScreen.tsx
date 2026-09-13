@@ -64,6 +64,7 @@ export default function ProvinceDetailScreen({ route, navigation }: Props) {
 
       <LandmarkList
         provinceId={provinceId}
+        provinceNameTh={province.nameTh}
         checkins={checkins}
         loading={checkinsLoading}
         onToggle={(landmarkId, pId) => toggleCheckin(landmarkId, pId)}

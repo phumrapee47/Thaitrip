@@ -255,3 +255,101 @@
 1. **T61 ยังไม่ครบ 76 จังหวัด** — ได้ข้อมูลจริง 45/76 จังหวัด (8 เดิม + 37 ใหม่) ก่อนโดน Overpass public instance จำกัด/บล็อกทราฟฟิกชั่วคราว (ดูรายละเอียดเต็มด้านบน) — **ผู้ใช้ต้องรันสคริปต์ต่อเองภายหลัง** ด้วย `node scripts/extract-overpass-landmarks.ts --only-missing` แล้ว `node scripts/merge-landmarks.ts` เมื่อ rate-limit reset (ไม่มี ETA แน่นอน เป็นนโยบายฝั่ง Overpass) — สคริปต์ resume ได้เองไม่ต้องเริ่มใหม่ทั้งหมด ตามที่ PM decision ประเด็น 13 ระบุไว้ล่วงหน้าแล้วว่าเป็นความเสี่ยงที่ยอมรับได้ของรอบนี้ (T61 เป็น P1 ไม่ใช่ P0)
 2. **T75 (ผนวก checklist จังหวัดข้อมูลไม่ครบเข้า T59) ไม่ได้สร้างเป็นเอกสารแยก** — ตาม PM scope ที่ระบุว่า T75 เป็น P2/optional และ T59 (ที่ควรผนวกเข้า) เองก็ยังไม่มีไฟล์อยู่จริงในโปรเจกต์ (เป็นงาน content-process ล้วนๆ นอก sprint) — รายชื่อจังหวัดที่ต้อง manual review ครบถ้วนอยู่ใน `scripts/output/overpass-landmarks-report.json` แล้ว (field `status`) ซึ่งเป็น machine-readable ทำหน้าที่เดียวกับ checklist ได้ทันที ทีม content สามารถ query ไฟล์นี้ได้ตรงๆ โดยไม่ต้อง maintain เอกสารซ้ำสอง
 3. ทุกอย่างอื่นใน P0 (T60, T62-T74) ทำครบตาม spec แล้ว ไม่มีการตัดฟีเจอร์ทิ้งเอง
+
+## รอบ 4: Bug fix (BUG-1 + accessibility label)
+
+- **BUG-1 (formatThaiDate UTC offset)**: ตรวจสอบ `src/utils/derived.ts` (`formatThaiDate`, บรรทัด 86-93) แล้วพบว่า**แก้ไปแล้วตั้งแต่ baseline commit ก่อนรอบนี้** (`git log -p` ยืนยัน commit `3a5d8f7` "Baseline commit..." มีข้อความ "today's QA fixes (formatThaiDate UTC bug...)" และโค้ดที่ commit นั้นใช้ `getUTCDate()/getUTCMonth()/getUTCFullYear()` ครบทุกตัวอยู่แล้ว) — **ไม่ต้องแก้เพิ่ม** ไม่มีการเปลี่ยนโค้ดในไฟล์นี้รอบนี้
+- **Accessibility label ไม่สอดคล้องกัน**: แก้ `src/components/LandmarkMap.tsx` (บรรทัด accessibilityLabel ของจุดบนแผนที่) จาก `'ยังไม่เช็คอิน'` เป็น `'ยังไม่ได้เช็คอิน'` ให้ตรงกับ `LandmarkListItem.tsx` (ใช้เป็น source of truth ตามที่ระบุ) — ข้อความคู่ตรงข้าม `'เช็คอินแล้ว'` เช็คแล้วว่าสอดคล้องกันอยู่แล้วทั้ง `LandmarkMap.tsx`, `LandmarkListItem.tsx`, `LandmarkProgressIndicator.tsx`, `landmarkDerived.ts` ไม่ต้องแก้
+- **ผลกระทบต่อเทสที่ต้องตามแก้** (เนื่องจาก label ของ map point กับ list row ตอนนี้ตรงกันทุกตัวอักษร ทำให้ query เดิมที่เคย unique กลายเป็น ambiguous):
+  - `src/components/LandmarkMap.test.tsx` — เปลี่ยนข้อความ label ที่ assert ให้ตรงตามค่าใหม่ (`sed` แทนที่ทั้งไฟล์)
+  - `src/__tests__/qa-round3/landmarkMapDegenerateBbox.test.tsx` — เปลี่ยนจาก `getByLabelText` เป็น `getAllByLabelText(...)[0]` (เลือก element ของแผนที่ ซึ่ง render ก่อน list row เสมอ ตามลำดับ heading -> map -> progress -> list ที่ fix ไว้ใน `LandmarkList.tsx`) พร้อม assert ว่ามี 2 elements ตรงกับ label นี้ (จากแผนที่ 1 + จาก list row 1)
+  - `src/__tests__/qa-round3/landmarkMapIntegration.test.tsx` — แก้ pattern เดียวกัน (`getAllByLabelText(...)[0]`) สำหรับจุดเริ่มต้นก่อนเช็คอิน (ส่วนกรณีหลังเช็คอินที่ label กลายเป็น `'เช็คอินแล้ว'` เดิมทีก็ใช้ `getAllByLabelText` อยู่แล้วตั้งแต่รอบ 3 ไม่ต้องแก้เพิ่ม)
+
+### ผลเทส
+- `npx jest` (เฉพาะไฟล์ที่เกี่ยวข้อง): 8 suites / 46 tests ผ่านทั้งหมด
+- `npx jest` (ทั้งชุด): 37 suites, 209 passed + 1 skip (เดิม, มีเอกสารอธิบายจาก QA รอบ 3 แล้วว่าเป็นข้อจำกัด jest กับ react-native-svg `onLongPress`) จาก 210 total — ไม่มี regression
+- `npx tsc --noEmit`: ผ่าน ไม่มี error
+
+---
+
+# รอบ 5: Landmark Cards & Media Integration (US-21–US-24) — implement มาก่อน pipeline (retroactive)
+
+โค้ดของรอบนี้ (HEIC→JPEG fix, Wikipedia/Wikimedia landmark cards, in-province search+filter, GlobalSearchBar) ถูกเขียนไว้แล้วนอก pipeline ก่อนที่ BA/PM จะเห็นโจทย์ — ดูรายละเอียด task mapping ใน `docs/tasks.md` หัวข้อ "รอบ 5" (T76–T86) และผลตรวจสอบเต็มใน `docs/test-report.md`/`docs/qa-result.md` หัวข้อ "รอบ 5"
+
+## T86 — ลบ dead code `src/components/LandmarkCardGrid.tsx` (post-QA cleanup)
+ยืนยันด้วย `grep -rn "LandmarkCardGrid" src/` ก่อนลบว่าไม่มีที่ใด import ไฟล์นี้เลย (ทั้ง Tester และ QA รอบ 5 ยืนยันตรงกันอิสระ) — ลบแล้วรัน `npx tsc --noEmit` (ผ่าน) และ `npx jest` เต็มชุด (46 suites, 236 passed + 1 skip เดิม + 1 fail ที่ `syncLifecycle.test.tsx` ซึ่งรันแยกไฟล์เดี่ยวผ่าน 100% — ยืนยันเป็น pre-existing flaky test ไม่เกี่ยวกับการลบไฟล์นี้ ตรงกับที่ Tester รอบ 5 พบมาก่อนแล้ว)
+
+---
+
+# รอบ 6: Bug Fix — US-25 (T87-T89)
+
+บริบท: มีงาน UI redesign (Advanced UI/UX Upgrade) รันคู่ขนานแก้ `src/components/LandmarkList.tsx` ไปแล้วก่อนหน้า (Bento Grid hero+2-col, `ShimmerBlock`, `PressableScale`, centralized `handleToggle` พร้อม haptics) แต่ยังไม่แตะ error-handling logic เลย — ตรวจโค้ดจริงทั้ง `wikipediaService.ts` และ `LandmarkList.tsx` ก่อนแก้ตามที่ PM ระบุ ไม่ใช้เลขบรรทัด/โครงสร้างเก่าจาก tasks.md เป็นค่าตายตัว งานรอบนี้เพิ่ม error-state ต่อยอด ไม่ได้แตะ/rewrite ทับ Bento Grid/Shimmer/Haptics ที่มีอยู่แล้ว
+
+## T87 — ไฟล์: `src/services/wikipediaService.ts`
+- แยก "ทุก category สำเร็จแต่ไม่มีบทความ" (ยังคง resolve เป็น `[]` เหมือนเดิม, ไม่ throw) ออกจาก "ทุก category ล้มเหลวด้วย error จริง" (network/timeout/HTTP-not-ok/JSON parse) ซึ่งตอนนี้ throw ออกไปให้ caller รู้
+- Implementation: เพิ่มตัวแปร `categorySucceeded` (ตั้ง `true` ทันทีที่ category ใด category หนึ่ง fetch สำเร็จ + `res.ok` + `res.json()` parse ผ่าน โดยไม่สนว่า pages จะว่างหรือไม่) และ `lastError` (เก็บ error ล่าสุดจากทั้งกรณี `!res.ok` และกรณี catch) — หลัง loop จบ ถ้า `!categorySucceeded` ให้ throw `lastError` ทันที ก่อนจะไปถึงขั้นตอน merge/cache/Commons photo
+- คง per-category catch-and-continue ไว้ตามเดิม (ยังลองหมวดถัดไปแม้บางหมวดพัง) ตราบใดที่ยังมีอย่างน้อย 1 หมวดสำเร็จจริง — ตรงตามที่ AC อนุญาต
+- `fetchCommonsPhoto` (fetch รูปเสริม) ไม่ต้องแก้อะไรเพิ่ม เพราะมันมี try/catch คืน `undefined` เองอยู่แล้วและถูกเรียกผ่าน `Promise.allSettled` — ไม่มีทางทำให้ฟังก์ชันหลัก throw อยู่แล้วโดยดีไซน์เดิม ตรงตาม AC ที่ระบุว่าความล้มเหลวของรูปเสริมเพียงอย่างเดียวไม่ถือเป็นเหตุ throw
+- อ้างอิง US-25 AC1, AC2, AC5
+
+## T88 — ไฟล์: `src/components/LandmarkList.tsx`
+- เพิ่ม state `fetchError` (boolean) แยกจาก `isFetchingWiki`/`landmarks` เดิม — set `true` ใน `catch` ของการเรียก `fetchAttractionsForProvince` (T87), reset เป็น `false` ทุกครั้งที่ fetch สำเร็จ (ไม่ว่าจะได้ผลลัพธ์กี่รายการ) และทุกครั้งที่เปลี่ยนจังหวัด (`provinceId` เปลี่ยน)
+- สร้าง component ภายในไฟล์เดียวกัน `LandmarkFetchErrorState` (ไม่ export) แสดงข้อความ "โหลดข้อมูลสถานที่ไม่สำเร็จ" — คนละข้อความ/คนละ component กับ `EmptyStateLandmarks` เดิมทุกประการ — ใช้ 2 ที่:
+  1. full-block เมื่อ `fetchError && landmarks.length === 0` (ไม่มี local seed และไม่มีผลลัพธ์เลย) — แทนที่ `EmptyStateLandmarks` เฉพาะเคสนี้เท่านั้น เคส resolve สำเร็จเป็น `[]` (fetchError=false) ยังเห็น `EmptyStateLandmarks` เดิมทุกประการ
+  2. compact banner เสริมด้านบนของ full render เมื่อมี landmark อยู่แล้ว (ทั้ง local seed + ที่เคย merge จาก wiki ก่อนหน้า) แต่ fetch ล้มเหลว — landmark เดิมทั้งหมดยังคง render ผ่าน flow เดิมทุกจุด (map/progress/card grid) ไม่ถูกทับ/ซ่อน/แทนที่เลย เป็นแค่ banner เสริมด้านบน (regression guard ของ US-22 ตามที่ PM เน้นย้ำ)
+- แก้ error-branch เดิม `catch { // Fallback: keep existing landmarks }` ให้ set `fetchError(true)` แทนที่จะเงียบเฉยๆ โดย logic "ไม่แตะ landmarks state เดิม" ยังคงอยู่เหมือนเดิม (ไม่มีการ setLandmarks ใน catch อยู่แล้วตั้งแต่เดิม)
+- อ้างอิง US-25 AC1, AC2, AC4
+
+## T89 — ทางลองใหม่ (retry) ในไฟล์เดียวกัน
+- Refactor effect เดิม (`useEffect` ที่เรียก fetch ตรงๆ) ให้เป็น `useCallback` ชื่อ `loadWikipediaAttractions` (dep: `provinceId`, `provinceNameTh`) แล้วให้ `useEffect` เรียกมันแทน — ปุ่ม "ลองอีกครั้ง" เรียก callback เดียวกันนี้ตรงๆ (ไม่ต้องออกจากหน้าจังหวัดแล้วกลับเข้ามาใหม่ตาม AC3)
+- ระหว่าง retry (`isFetchingWiki === true`) ทั้ง full-block และ compact banner ของ `LandmarkFetchErrorState` จะสลับจากปุ่ม "ลองอีกครั้ง" เป็น `ShimmerBlock` reuse ของเดิม (ไม่สร้าง loading component ใหม่) — ข้อความ error ("โหลดข้อมูลสถานที่ไม่สำเร็จ") ยังคงค้างอยู่ระหว่าง retry (ไม่ blank หาย) จนกว่าผลจะออก
+- Retry สำเร็จ → `fetchError` reset เป็น `false` ทันทีก่อน merge landmark ใหม่เข้า state → ผลลัพธ์แสดงตามปกติเหมือน fetch สำเร็จตั้งแต่แรก (US-22)
+- Retry ล้มเหลวอีก → `fetchError` ยังคง `true` ต่อ, `isFetchingWiki` กลับเป็น `false` (ไม่ค้าง loading ตลอดไป) → ปุ่ม "ลองอีกครั้ง" กลับมาให้กดใหม่ได้เรื่อยๆ
+- เพิ่ม race guard `fetchIdRef` (นับ generation ของแต่ละ call) คู่กับ `isMountedRef` เดิม กัน stale response ทับ state ที่ใหม่กว่า (กรณีสลับจังหวัดเร็วๆ ระหว่างที่ fetch ค้างอยู่ หรือกด retry ซ้ำสองครั้งติดกันก่อน call แรกเสร็จ) — ของเดิมใช้ `isMounted` local ต่อ effect instance เท่านั้น ตอนนี้ต้อง robust กว่าเดิมเพราะ callback เดียวกันถูกเรียกได้จากทั้ง auto-effect และปุ่ม retry
+- กด "ลองอีกครั้ง" ระหว่างที่ยังโหลดอยู่ไม่ได้ (ปุ่มถูกแทนที่ด้วย ShimmerBlock ระหว่างนั้น) กันการยิงซ้ำโดยไม่ตั้งใจ
+- อ้างอิง US-25 AC3, AC6
+
+## Tests เขียนเพิ่ม/แก้ในรอบ 6
+- ใหม่: `src/components/LandmarkList.test.tsx` — 5 tests (component-level, mock `../services/wikipediaService` module ทั้งไฟล์): error state แยกจาก empty state เมื่อ reject (AC2/AC5), empty state เดิมเมื่อ resolve `[]` (AC1/AC5), local seed (phuket) ยัง render ปกติครบพร้อม banner เสริมเมื่อ fetch พัง (AC4), retry เรียก fetch ซ้ำ+โชว์ loading ระหว่างรอ+เคลียร์ error เมื่อสำเร็จ (AC3/AC6), retry พังซ้ำแล้ว error ยังค้างอยู่ไม่หาย ไม่ loading ค้างตลอดไป
+- แก้ `src/services/wikipediaService.test.ts`: เดิม test `'gracefully handles network failures without throwing'` อ้างอิง silent-fallback แบบเก่าที่ตอนนี้เปลี่ยนพฤติกรรมแล้วตาม US-25 — แทนที่ด้วย 4 tests ใหม่: throw เมื่อทุก category network error, throw เมื่อทุก category HTTP not-ok, resolve `[]` เมื่อสำเร็จแต่ไม่มีบทความ (ไม่ throw), ไม่ throw ถ้ามีอย่างน้อย 1 category สำเร็จแม้ category อื่นพัง
+- แก้ `src/__tests__/qa-round3/landmarkMapIntegration.test.tsx` และ `src/__tests__/integration/landmarkCheckin.test.tsx`: ทั้งสองไฟล์นี้เดิมไม่ได้ mock `wikipediaService` เลย รันผ่าน real (unmocked) `fetch` ใน jest env ซึ่งเดิมล้มเหลวแบบเงียบๆ กลายเป็น `[]` (บังเอิญตรงกับ "chaiyaphum ไม่มีข้อมูล" ที่ test ต้องการ) — พอ T87 เปลี่ยนให้ throw จริงเมื่อ fetch ล้มเหลวจริง สอง test นี้เลยเห็น error state แทน empty state ที่คาดไว้ (เพราะในเน็ตเวิร์กแวดล้อม jest ไม่มี network จริง ทำให้เคสนี้กลายเป็น "fetch ล้มเหลวจริง" ไม่ใช่ "fetch สำเร็จแต่ว่าง" อีกต่อไป) — แก้โดยเพิ่ม `jest.mock('../../services/wikipediaService')` + `.mockResolvedValue([])` ให้ตรงกับเจตนาเดิมของ test (จำลอง "query สำเร็จจริงแต่ไม่มีบทความ" ให้ตรงกับ AC1 แทนที่จะพึ่ง fetch พังโดยบังเอิญ) ไม่ได้เปลี่ยน assertion ใดๆ ของ test เดิมเลย
+
+## จุดที่ตรวจสอบแล้วไม่ต้องทำ (รอบ 6)
+- **`src/components/LandmarkCardGrid.tsx`** ที่ PM ระบุว่าเป็น dead code — ตรวจสอบด้วย `Glob`/`grep -rn "LandmarkCardGrid"` ทั่ว `src/` และทั้ง repo (ไม่รวม `node_modules`) แล้วพบว่า**ไฟล์นี้ไม่มีอยู่จริงในโปรเจกต์ปัจจุบัน** — ตรวจ dev-notes เดิมพบว่าไฟล์นี้ถูกลบไปแล้วตั้งแต่ T86 (post-QA cleanup ของรอบ 5, ดูหัวข้อด้านบน) ไม่มี git-tracked หรือ untracked เหลืออยู่เลย จึงไม่มีอะไรให้ลบเพิ่มในรอบนี้ (ข้อมูลที่ PM ได้รับมาเป็นข้อมูลเก่าก่อนรอบ 5 cleanup)
+
+## ผลรัน (รอบ 6)
+- `npx tsc --noEmit -p .` — ผ่าน ไม่มี error
+- `npx jest` ทั้งชุด — **47 suites ผ่านหมด, 245 passed + 1 skip เดิม (246 total)**, ไม่มี test แดง (พบ 1 ครั้งที่ `qa-round2/emailLinkIntegrity.test.tsx` fail ตอนรันรวมทั้งชุดด้วย `render function has not been called` แต่รันแยกไฟล์เดี่ยวผ่าน 100% ทั้ง 3 tests — เป็น pre-existing flaky test ของไฟล์ที่ไม่เกี่ยวกับ `LandmarkList`/`wikipediaService` เลย (component `EmailLinkForm.tsx`), ไม่ใช่ regression จากรอบนี้ — รันซ้ำอีกรอบทั้งชุดผ่าน 47/47 ปกติ)
+
+## ไม่มีจุดที่ต้องส่งกลับ PM ตัดสินใจในรอบนี้
+T87-T89 ทำครบตาม AC ของ US-25 ทั้ง 6 ข้อ ไม่มีการตัดขอบเขตหรือเปลี่ยน scope ใดๆ
+
+---
+
+## รอบ 7: Advanced UI/UX v3 (Landmark List redesign) + HEIC/photo-upload 400 fix (นอก pipeline, ทำโดยตรงตามคำขอผู้ใช้)
+
+### 1. Landmark List: Magazine/Bento redesign
+- `src/components/LandmarkList.tsx`: เพิ่ม **card/map view toggle** (segmented control "🖼️ การ์ด" / "🗺️ แผนที่") — `LandmarkMap` ไม่ render อยู่ใน fold แรกอีกต่อไป (ไม่เบียดพื้นที่รูปภาพ), ค่าเริ่มต้น = โหมดการ์ด, reset กลับเป็นการ์ดทุกครั้งที่เปลี่ยนจังหวัด — `LandmarkProgressIndicator` ยังคงแสดงทั้งสองโหมด (shared context)
+- `src/components/LandmarkCard.tsx`:
+  - ภาพปกเปลี่ยนจาก fixed-height เป็น **aspect ratio 16:9** ทั้ง hero และ compact variant (`aspectRatio: 16/9`)
+  - เพิ่ม `expo-linear-gradient` overlay บางๆ (`rgba(0,0,0,0.25)`) ที่ภาพทุกใบ (ไม่ใช่แค่ hero) เพื่อ contrast ให้ badge, hero ใช้ overlay หนักกว่า (`0.7`) เพื่อรองรับ title บนภาพ
+  - Category badge เปลี่ยนจากกล่องสี่เหลี่ยมพื้นดำทึบเป็น **pill โปร่งแสง** (`borderRadius: RADIUS.full`, `withAlpha(categoryColor.fg, 0.82)`)
+  - ปุ่มเช็คอินปรับ `minHeight` 40 → **44pt** (thumb-zone)
+  - Fallback ภาพ: เพิ่ม `FALLBACK_LANDMARK_IMAGE` ใน `src/theme.ts` (ภาพ landscape จริงจาก Wikimedia Commons ผ่าน `Special:FilePath?width=800` — endpoint นี้ render ตามขนาดที่ขอได้จริง ต่างจากการเดา URL `upload.wikimedia.org/.../NNNpx-*` ตรงๆ ซึ่ง 400 ถ้าไม่ตรงกับ cache ที่มีอยู่แล้ว, ตรวจสอบแล้วว่า resolve เป็น JPEG จริง 200 OK) — ใช้แทนไอคอน 🏛️ เดิมเมื่อ `imageUrl` ไม่มีหรือโหลดไม่สำเร็จ (`onError`) เพื่อไม่ให้การ์ดดูเหมือน "ว่าง/พัง"
+- `src/components/GlobalSearchBar.tsx`: ปรับ token ให้ตรง `SPACING`/`RADIUS`/`SHADOWS` เดียวกับรอบก่อน, แถวผลลัพธ์ `minHeight: 44`
+
+### 2. Bug fix: Photo upload HEIC/400 Bad Request
+- Root cause: `src/sync/photoUpload.ts` เดิมใช้ `fetch(uri).blob()` เพื่ออ่านไฟล์รูป local ก่อนอัปโหลดขึ้น Supabase Storage — ไม่เสถียรบน iOS สำหรับ `file://` URI (blob body ว่าง/ไม่ครบ ทำให้ Supabase Storage ตอบ 400)
+- แก้โดยเปลี่ยนมาใช้ `expo-file-system/legacy`'s `readAsStringAsync(uri, { encoding: 'base64' })` แล้ว `decode()` จาก `base64-arraybuffer` เป็น ArrayBuffer ก่อนส่งเข้า `.upload()` — ติดตั้ง dependency ใหม่ 2 ตัว: `expo-file-system`, `base64-arraybuffer` (ผ่าน `npx expo install` ให้ตรง SDK 57)
+- Rename injectable test dependency จาก `fetchBlob` เป็น `readAsBase64` ใน `PhotoUploadDeps` — อัปเดต `photoUpload.test.ts` ให้ตรง
+- `src/components/PhotoPicker.tsx`: **ไม่ต้องแก้** — ตรวจสอบแล้วว่ามีการแปลงทุกรูปเป็น JPEG ผ่าน `ImageManipulator.manipulateAsync(..., { format: SaveFormat.JPEG })` อยู่แล้วทุก asset ที่เลือก (รวม `.heic`) ตั้งแต่รอบ T76 เดิม มี test คลุมอยู่แล้ว (`photoPickerConversionHappyPath.test.tsx`)
+- **หมายเหตุสำคัญสำหรับ test แบบ integration ที่ไม่ inject `readAsBase64`** (เช่น `syncLifecycle.test.tsx` ที่เรียกผ่าน `SyncContext` จริง ไม่ใช่เรียก `uploadPendingPhotos` ตรงๆ): ต้อง `jest.mock('expo-file-system/legacy', ...)` ให้ `readAsStringAsync` resolve เป็น base64 string ที่ใช้ได้จริง เพราะ jest-expo auto-mock ของ `expo-file-system` จะ resolve เป็น `undefined` เฉยๆ (ไม่ throw) ทำให้ `decode(undefined)` ล้มเหลวเงียบๆ ในบล็อก catch ของ `uploadPendingPhotos` (แสดงผลเหมือนอัปโหลดล้มเหลวแต่ไม่มี error message ชัดเจน) — แก้ไว้แล้วในไฟล์นี้
+
+### 3. Test fixes / regression guards
+- `src/__tests__/qa-round4/landmarkCardsWikipediaIntegration.test.tsx`: เปลี่ยนการตรวจ placeholder จาก text `'🏛️'` (ไม่มีแล้ว) เป็นตรวจ `testID="landmark-card-image"` ว่า source.uri ตรงกับ `FALLBACK_LANDMARK_IMAGE`
+- `src/__tests__/qa-round3/landmarkMapIntegration.test.tsx`, `landmarkMapDegenerateBbox.test.tsx`: ปรับให้กดปุ่ม toggle "มุมมองแผนที่" ก่อนเข้าถึงจุดบนแผนที่ (เพราะไม่ได้ render อยู่ default อีกต่อไป)
+  - **บทเรียนสำคัญที่เจอระหว่างแก้**: การกด state-changing press หลายครั้งติดกันใน RTL โดยไม่มี `await waitFor(...)` คั่นระหว่างกลาง (โดยเฉพาะครั้งแรกหลัง mount) อาจทำให้ press ครั้งถัดไปในเทสต์เดียวกัน "ดูเหมือนไม่มีผล" (React state ไม่ commit ทันเวลาให้ query ถัดไปเห็น) — ไม่ใช่บั๊กจริงของแอป (ยืนยันด้วย debug log ว่า business logic/DB layer ทำงานถูกต้อง 100% ทุกครั้ง) แต่เป็นข้อจำกัดของการทดสอบ async ใน RTL — แก้ด้วยการ `await waitFor(...)` เช็คสถานะที่ **ไม่คลุมเครือ** (เช่น `.props.accessibilityState.selected` ของปุ่ม toggle เอง แทนที่จะเช็ค accessibilityLabel ที่ใช้ร่วมกันระหว่าง component หลายตัว ซึ่งอาจ false-positive ผ่านได้ทั้งที่ state จริงยังไม่เปลี่ยน) ทันทีหลังทุก state-changing press ก่อนจะ press ถัดไป
+
+### ผลการรัน
+- `npx tsc --noEmit -p .` — ผ่าน ไม่มี error
+- `npx jest` ทั้งชุด — **47/47 suites ผ่าน, 245 passed + 1 skip เดิม** รันซ้ำ 2 รอบติดกันเพื่อยืนยันความเสถียร (ไม่มี flaky เหลือจากรอบนี้)

@@ -12,9 +12,10 @@ tools: Read, Write, Grep, Glob
 
 ## ขั้นตอนทำงาน
 1. อ่าน docs/requirements.md และ docs/tasks.md
-2. ออกแบบ user flow หลักของแต่ละ user story (เส้นทางที่ user เดินผ่านหน้าจอ)
-3. ระบุ component ที่ต้องใช้ พร้อม state ที่เป็นไปได้ (default, loading, empty, error, success)
-4. ถ้ามีจุดที่ UX ขัดกับสิ่งที่ requirement เขียนไว้ (เช่น ทำตามที่เขียนแล้ว UX แย่) ให้เสนอทางเลือกไว้ในเอกสาร แล้วให้ orchestrator ส่งให้ PM ตัดสินใจ อย่าตัดสินใจเปลี่ยน requirement เอง
+2. ศึกษาและปฏิบัติตามมาตรฐานใน `.claude/skills/advanced-mobile-uiux/SKILL.md` (8pt Grid, Bento Layout, Haptics, Shimmer Skeletons, Thumb-zone)
+3. ออกแบบ user flow หลักของแต่ละ user story (เส้นทางที่ user เดินผ่านหน้าจอ)
+4. ระบุ component ที่ต้องใช้ พร้อม state ที่เป็นไปได้ (default, loading ด้วย Shimmer, empty, error, success) พร้อม micro-interactions และ haptic triggers
+5. ถ้ามีจุดที่ UX ขัดกับสิ่งที่ requirement เขียนไว้ (เช่น ทำตามที่เขียนแล้ว UX แย่) ให้เสนอทางเลือกไว้ในเอกสาร แล้วให้ orchestrator ส่งให้ PM ตัดสินใจ อย่าตัดสินใจเปลี่ยน requirement เอง
 
 ## Output
 เขียนไฟล์ docs/design-spec.md:

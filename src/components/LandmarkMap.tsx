@@ -66,7 +66,7 @@ export default function LandmarkMap({ landmarks, checkins, onToggle }: LandmarkM
                 fill="transparent"
                 onPress={() => onToggle(landmark.id, landmark.provinceId)}
                 accessible
-                accessibilityLabel={`${landmark.nameTh}, ${visited ? 'เช็คอินแล้ว' : 'ยังไม่เช็คอิน'}`}
+                accessibilityLabel={`${landmark.nameTh}, ${visited ? 'เช็คอินแล้ว' : 'ยังไม่ได้เช็คอิน'}`}
               />
               <Circle
                 cx={x}

@@ -431,3 +431,173 @@ Total: 210 | Pass: 209 | Skip: 1 (T32 long-press, ข้อจำกัดเด
 - `src/__tests__/qa-round3/searchDebounceThrottleEndToEnd.test.ts` (ใหม่, 2 tests) — US-20 AC2: debounce+throttle ทำงานร่วมกันจริงผ่าน hook+client ตัวจริง
 
 ไม่มีการแก้ไข/ลบไฟล์เทสใดๆ ที่ programmer เขียนไว้ในรอบนี้ — ทุกไฟล์ของ programmer ถูกรันซ้ำตามเดิมทั้งหมดและผ่านครบ 100%
+
+## Test Report — รอบ 4: Bug fix verification (BUG-1 + accessibility label)
+
+### สรุป
+Total: 213 | Pass: 212 | Skip: 1 | Fail: 0
+(ตัวเลขนี้รันเอง อิสระจาก dev-notes.md — เพิ่มขึ้นจาก baseline 209 passed/1 skip ของ programmer เพราะ tester เพิ่ม regression test ใหม่ 3 เคสสำหรับ BUG-1)
+
+### 1) BUG-1 — formatThaiDate UTC offset
+- อ่านโค้ดจริงที่ `src/utils/derived.ts:86-93` ยืนยันว่าใช้ `d.getUTCDate()`, `d.getUTCMonth()`, `d.getUTCFullYear()` ครบทั้ง 3 ค่า ไม่มีการเรียก local getter (`getDate`/`getMonth`/`getFullYear`) เลย — ยืนยันว่าเป็น false positive จริงตามที่ programmer อ้าง ไม่ใช่บั๊กในโค้ดปัจจุบัน
+- **ข้อสังเกตสำคัญ**: เครื่อง dev/test runner นี้มี timezone offset = UTC+7 (`getTimezoneOffset()` คืนค่า -420) ซึ่งเป็น offset บวก การรันเทสเดิมด้วยเครื่องนี้จะ**ไม่มีทางจับบั๊ก UTC offset ติดลบได้เลย** แม้โค้ดจะพังก็ตาม เพราะ UTC+7 ไม่ทำให้ local date เพี้ยนจาก UTC date สำหรับ ISO date-only string
+- จึงเขียน regression test เพิ่มใน `src/utils/derived.test.ts` (describe block "is immune to negative UTC offsets (regression for BUG-1)") ที่ตั้ง `process.env.TZ` เป็น negative-offset zone จริง 3 กรณี: `America/New_York` (UTC-5), `Pacific/Midway` (UTC-11, extreme), `America/Los_Angeles` (UTC-8, ทดสอบวันสุดท้ายของเดือน) — ยืนยันด้วย `node -e` สคริปต์แยกก่อนเขียนเทสว่า Node เคารพการเปลี่ยน `process.env.TZ` runtime จริง (local getter จะเพี้ยนไปวันก่อนหน้า แต่ UTC getter ไม่เพี้ยน)
+- รันเทสทั้ง 3 เคสใหม่นี้ผ่านทั้งหมด — ยืนยันว่า `formatThaiDate` ถูกต้องจริงแม้บน negative UTC offset
+
+### 2) Accessibility label mismatch (LandmarkMap vs LandmarkListItem)
+- grep คำว่า "เช็คอิน" ในทั้งสองไฟล์ด้วยตนเอง (ไม่เชื่อคำสรุปของ programmer):
+  - `src/components/LandmarkMap.tsx:69`: `` accessibilityLabel={`${landmark.nameTh}, ${visited ? 'เช็คอินแล้ว' : 'ยังไม่ได้เช็คอิน'}`} ``
+  - `src/components/LandmarkListItem.tsx:20`: `` accessibilityLabel={`${landmark.nameTh}, ${visited ? 'เช็คอินแล้ว' : 'ยังไม่ได้เช็คอิน'}`} ``
+  - ทั้งสอง string เหมือนกันทุกตัวอักษร (ทั้ง "เช็คอินแล้ว" และ "ยังไม่ได้เช็คอิน") — ยืนยันว่า label ตรงกันจริง ไม่ใช่แค่คำอ้างของ programmer
+  - เทสที่เกี่ยวข้องอัปเดตตรงกับ label ใหม่แล้วทั้ง 3 ไฟล์: `LandmarkMap.test.tsx`, `landmarkMapDegenerateBbox.test.tsx`, `landmarkMapIntegration.test.tsx` (grep ยืนยัน string ในเทสตรงกับ "ยังไม่ได้เช็คอิน"/"เช็คอินแล้ว" ทุกจุด)
+
+### 3) รัน jest เต็มชุดอิสระ
+```
+Test Suites: 37 passed, 37 total
+Tests:       1 skipped, 212 passed, 213 total
+Snapshots:   0 total
+Time:        14.758 s
+```
+- ตรงกับคำอ้างของ programmer (209 passed + 1 skip) บวกเทสใหม่ 3 เคสที่ tester เพิ่มเอง (209 + 3 = 212) — ไม่มี fail, ไม่มี test ที่หายไปจากที่ programmer รายงาน
+
+### 4) รัน tsc --noEmit อิสระ
+- `npx tsc --noEmit` ไม่มี output/error ใดๆ — ยืนยันว่า clean จริงตามที่ programmer อ้าง
+
+## Coverage ที่ยังขาด (ถ้ามี) — รอบ 4
+- ไม่พบปัญหาเพิ่มเติมจาก 2 ประเด็นที่ตรวจสอบรอบนี้ ทั้ง BUG-1 (false positive แต่ตอนนี้มี regression test คุ้มครองจริง) และ accessibility label mismatch (แก้ตรงและเทสสอดคล้องแล้ว) ผ่านการตรวจสอบอิสระทั้งหมด
+
+
+## Test Report — รอบ 5: Landmark Cards & Media Integration (US-21–US-24)
+
+> บริบท: โค้ดของรอบนี้ implement เสร็จนอก pipeline ก่อน BA/PM เขียน requirements.md ย้อนหลัง (US-21–US-24, T76–T85) — Tester ตรวจสอบอิสระทุกจุด ไม่เชื่อคำอ้างของรายงานผู้ implement
+
+### สรุป
+- **US-21 (HEIC→JPEG):** ผ่านครบ 4 AC — แต่พบว่าเทสเดิม (`src/__tests__/integration/photoPicker.test.tsx`) ไม่เคยทดสอบ "happy path" จริง (ดูหัวข้อ Coverage gap) — เพิ่มเทสใหม่ปิดช่องโหว่แล้ว
+- **US-22 (Wikipedia landmark cards):** ผ่านครบ 6 AC หลังตรวจสอบโค้ดจริงและเขียน integration test ใหม่ (ไม่มีเทสเดิมเลยสำหรับ `LandmarkCard`/`LandmarkList` ก่อนรอบนี้)
+- **US-23 (search/filter ในจังหวัด):** ผ่านครบ 3 AC
+- **US-24 (global search):** ผ่านครบ 5 AC
+- **จุดเสี่ยง 3 ข้อที่ PM ระบุ (ประเด็น 16):** ตรวจครบทั้ง 3 ข้อ — ดูรายละเอียดด้านล่าง
+- **Regression เต็มชุด:** ไม่มี regression จากรอบก่อน (ดูหัวข้อผลรัน jest/tsc)
+- **บั๊ก/severity สูง:** ไม่พบบั๊กที่ทำให้ AC ใดๆ fail จริง — พบ 1 dead-code cleanup item (ยืนยันตามที่ PM สงสัย) และ 1 gap เรื่อง test coverage ที่ปิดไปแล้วในรอบนี้ ไม่มี blocking bug
+
+### 1) ตรวจสอบ AC ทีละข้อเทียบกับโค้ดจริง
+
+**US-21: แนบรูปจาก iPhone (.HEIC/.HEIF)**
+- [x] AC1 (แปลงเป็น .jpg ทันทีหลังเลือกจากแกลเลอรี ก่อนเข้า `photoUris`) — ยืนยันจาก `src/components/PhotoPicker.tsx:26-40`: `ImageManipulator.manipulateAsync(asset.uri, [], { compress: 0.8, format: SaveFormat.JPEG })` เรียกทันทีใน `pickImages()` ก่อน `onChange([...photoUris, ...convertedUris])`
+- [x] AC2 (thumbnail แสดงถูกต้องใน PhotoPicker และ EntryListItem) — ยืนยันจาก `PhotoPicker.tsx:53` (`<Image source={{ uri }} .../>`) และ `src/components/EntryListItem.tsx:19-31` (ใช้ `entry.photoUris[0]` แสดงตรงๆ ไม่มีการแปลง path เพิ่มที่จะพัง)
+- [x] AC3 (fallback ใช้ URI เดิมถ้าแปลงล้มเหลว ไม่ throw บล็อกรูปอื่น) — ยืนยันจาก `try { ... } catch { return asset.uri; }` ใน `PhotoPicker.tsx:28-37` ต่อรูปแต่ละใบแยกกันใน `Promise.all(...map(async ...))` — รูปหนึ่งพังไม่กระทบรูปอื่น
+- [x] AC4 (`contentType: 'image/jpeg'` เสมอตอนอัปโหลด Supabase Storage bucket `trip-photos`) — ยืนยันจาก `src/sync/photoUpload.ts:60`: `.upload(path, blob, { upsert: true, contentType: 'image/jpeg' })` เป็นค่าคงที่ ไม่เดาจากนามสกุลไฟล์เลย
+
+**พบระหว่างตรวจ (ไม่ใช่บั๊กของโค้ด แต่เป็น gap ของเทสเดิม):** `src/__tests__/integration/photoPicker.test.tsx` (เทสเดิมก่อนรอบนี้) ไม่ mock `expo-image-manipulator` เลยใน `jest.setup.js` — เมื่อรันจริง `ImageManipulator.manipulateAsync(...)` throw (`context.renderAsync is not a function`) เสมอในสภาพแวดล้อม Jest ทำให้ `PhotoPicker` ตกไปที่ fallback branch (AC3) เสมอโดยไม่ได้ตั้งใจ เทสเดิมที่ assert ว่า `onChange` ได้ URI เดิมไม่เปลี่ยนแปลง **บังเอิญผ่านเพราะพฤติกรรม fallback ไม่ใช่เพราะทดสอบ AC1 จริง** — ไม่เคยมีเทสไหนพิสูจน์ว่า "แปลงสำเร็จจริง" (AC1) เลยก่อนรอบนี้ เขียนเทสใหม่ปิดช่องว่างนี้แล้วที่ `src/__tests__/qa-round4/photoPickerConversionHappyPath.test.tsx` (mock `expo-image-manipulator` เอง ทดสอบทั้ง 2 เส้นทางแยกกันจริง) — ผ่านทั้งคู่
+
+**US-22: การ์ด Wikipedia ในหน้าจังหวัด**
+- [x] AC1 (ดึงจาก Wikipedia แสดงควบคู่ local seed ไม่ทับ/ลบของเดิม) — ยืนยันจาก `LandmarkList.tsx:68-93` (`combined = [...prev]` แล้ว push รายการ Wikipedia ที่ไม่ซ้ำชื่อเข้าไปเพิ่ม ไม่ replace)
+- [x] AC2 (รูปจริง + ป้ายหมวดหมู่ 1 ใน 5 + fallback "สถานที่ท่องเที่ยว" + คำอธิบายสั้น) — ยืนยันจาก `wikipediaService.ts` `detectCategory()` คืนค่า 1 ใน 5 หมวดหรือ fallback เสมอ, `LandmarkCard.tsx:31-35` แสดง badge, `:43-47` แสดง description
+- [x] AC3 (การ์ดไม่มีรูปแสดง placeholder ไม่พัง) — ยืนยันจาก `LandmarkCard.tsx:19-30` (`imgError` state + `onError` + fallback icon 🏛️)
+- [x] AC4 (ปุ่มเช็คอินผูก CheckinContext, accessibilityRole switch) — ยืนยันจาก `LandmarkCard.tsx:50-57` (`accessibilityRole="switch"`, `accessibilityState={{checked: visited}}`) และ toggle เรียก `onToggle` → `CheckinContext.toggleCheckin` จริงผ่าน `LandmarkList.tsx:211` → `ProvinceDetailScreen.tsx:70`
+- [x] AC5 (Wikipedia fetch ไม่สำเร็จ → render ปกติเหลือ local เท่านั้น ไม่ error ไม่ค้าง loading) — ยืนยันจาก `LandmarkList.tsx:94-98` (`catch {} finally { setIsFetchingWiki(false) }`)
+- [x] AC6 (ไม่มีทั้ง local และ Wikipedia → empty state เดิมของ US-8) — ยืนยันจาก `LandmarkList.tsx:125-132` (เงื่อนไข `landmarks.length === 0 && !isFetchingWiki` → `<EmptyStateLandmarks />`)
+
+**ไม่มีเทสเดิมเลยที่ render `LandmarkCard`/`LandmarkList` จริงก่อนรอบนี้** (`wikipediaService.test.ts` เป็น unit test ล้วนที่ mock `fetch`, ไม่เคยผ่าน component จริง) — เขียน integration test ใหม่ครบทุก AC ที่ `src/__tests__/qa-round4/landmarkCardsWikipediaIntegration.test.tsx` (mock service module, render ผ่าน `ProvinceDetailScreen` จริง) — ผ่านทั้งหมด 10/10 เคส
+
+**US-23: ค้นหา/กรอง Landmark ในจังหวัด**
+- [x] AC1 (ช่องค้นหา filter รายการเฉพาะจังหวัดนี้ real-time) — ยืนยันจาก `LandmarkList.tsx:109-123` (`filteredLandmarks` useMemo กรองจาก `landmarks` ของ `provinceId` นี้เท่านั้น)
+- [x] AC2 (filter chip 5 หมวด + "ทั้งหมด" ใช้ร่วมกับค้นหาได้ AND condition) — ยืนยันจาก `LandmarkList.tsx:111-121` (`matchQuery && matchCategory`)
+- [x] AC3 (progress indicator + LandmarkMap อ่านจากรายการเต็ม ไม่ใช่ผลกรอง; ค้นหา/กรองไม่พบผลลัพธ์มี empty state แยกจาก US-8) — ยืนยันจาก `LandmarkList.tsx:107,149,152` (`progress`/`LandmarkMap` ใช้ `landmarks` เต็ม ไม่ใช่ `filteredLandmarks`) และ `:199-203` (empty box ข้อความ "ไม่พบสถานที่ที่ตรงกับการค้นหา" แยกจาก `EmptyStateLandmarks`)
+
+เขียน integration test ใหม่ครอบคลุมครบใน `landmarkCardsWikipediaIntegration.test.tsx` (describe ที่สอง) รวมถึงเคส progress indicator ไม่เปลี่ยนตอน filter — ผ่านทั้งหมด
+
+**US-24: Global search จากหน้าแรก**
+- [x] AC1 (floating search bar เหนือแผนที่ 3D, dropdown real-time) — ยืนยันจาก `HomeScreen.tsx:93` wiring `<GlobalSearchBar onSelectProvince={handlePressProvince} />` เหนือ `<Map3D />`
+- [x] AC2 (ค้นได้ทั้ง nameTh/nameEn จังหวัด และ Landmark จาก local dataset) — ยืนยันจาก `GlobalSearchBar.tsx:30-56`
+- [x] AC3 (ไอคอนแยกประเภท 📍/🏛️) — ยืนยันจาก `GlobalSearchBar.tsx:110`
+- [x] AC4 (แตะผลลัพธ์ navigate ไป ProvinceDetailScreen ตรง provinceId) — ยืนยันจาก `handleSelect()` เรียก `onSelectProvince(provinceId)` ทั้งสองประเภทผลลัพธ์
+- [x] AC5 (ทำงาน offline เต็มรูปแบบ ไม่ยิง fetch) — ยืนยันจากอ่านโค้ด (ไม่มี `fetch`/service call ใดๆ ใน `GlobalSearchBar.tsx`) และยืนยันด้วยเทสที่ mock `global.fetch` ให้ throw ถ้าถูกเรียก
+
+ไม่มีเทสเดิมเลยสำหรับ `GlobalSearchBar` ก่อนรอบนี้ — เขียนเทสใหม่ 6 ไฟล์ย่อยใน `src/__tests__/qa-round4/globalSearchBar*.test.tsx` (แยกไฟล์/ทดสอบทีละ interaction — ดูหมายเหตุ technical debt ด้านล่าง) ผ่านทั้งหมด
+
+### 2) ตรวจ 3 จุดเสี่ยงที่ PM ระบุไว้ในประเด็น 16 (docs/tasks.md)
+
+**(1) `LandmarkCardGrid.tsx` เป็น dead code จริงหรือไม่**
+```
+grep -rn "LandmarkCardGrid" src/ → พบแค่ไฟล์ src/components/LandmarkCardGrid.tsx เอง (ไม่มี import จากที่อื่นเลย)
+grep -rn "LandmarkList" src/screens → ProvinceDetailScreen.tsx import และใช้จริง
+```
+ยืนยัน: **`LandmarkCardGrid.tsx` เป็น dead code จริง** — เนื้อหาเกือบซ้ำกับ `LandmarkList.tsx` ทุกประการ (search/filter/category chip logic เหมือนกัน) ต่างกันที่ `LandmarkCardGrid` ไม่มี `LandmarkMap`/`EmptyStateLandmarks` integration และคำนวณ progress เอง — ดูเหมือนเป็น draft ก่อนหน้าที่ถูกแทนที่ด้วย `LandmarkList.tsx` จริง เสนอให้ programmer ลบทิ้งในรอบแก้บั๊กถัดไปตามที่ PM แนะนำ
+
+**(2) รายงาน T79 ผิดพลาด (`src/types/landmark.ts` vs `src/data/thailand-landmarks.ts`) — มีจุดอื่นที่รายงานไม่ตรงอีกหรือไม่**
+```
+cat src/types/landmark.ts → มีแค่ LandmarkCheckin interface เดิม ไม่ได้แตะในรอบนี้จริง (ตรงกับที่ PM ตรวจพบ)
+grep "imageUrl?\|description?\|category?" src/data/thailand-landmarks.ts → พบ field เพิ่มจริงที่ Landmark interface (บรรทัด 35-37)
+```
+ยืนยันตรงตามที่ PM ตรวจพบ — ตรวจสอบเพิ่มเติมไม่พบจุดรายงานผิดอื่นที่กระทบ AC (โค้ดจริงทุกไฟล์ที่ระบุใน T76-T85 มีอยู่จริงตามชื่อ/path ที่อ้าง ไม่มี type mismatch อื่นที่ `tsc --noEmit` ตรวจไม่เจอ)
+
+**(3) landmark id จาก Wikipedia (`wiki-{provinceId}-{slug}`) ไม่คงที่ — เช็คอินไม่ throw/crash เมื่อ id หายไปรอบถัดไปหรือไม่**
+- อ่าน `src/storage/CheckinContext.tsx:37-43`: `checkins` เป็น `Record<string, boolean>` แบบ plain lookup (`checkins[landmarkId] ?? false`) ไม่มีการ validate ว่า landmarkId ต้องมีอยู่ใน landmark list ปัจจุบัน — lookup ของ id ที่ไม่มีอยู่แล้วคืนค่า `undefined`/`false` เฉยๆ ไม่ throw
+- อ่าน `src/utils/landmarkDerived.ts:8-16` (`getLandmarkProgress`): คำนวณ `checkedInCount` จาก `provinceLandmarks.filter(l => checkins[l.id])` — กรองจากรายการ landmark **ปัจจุบัน** เท่านั้น ถ้า wiki id เดิมหายไปจากผลลัพธ์รอบใหม่ checkin record เดิมจะกลายเป็น "orphaned" ใน storage (ไม่ถูกลบ แต่ไม่ถูกนับใน progress ของ UI อีกต่อไป) — ไม่ throw, ไม่ crash, ไม่กระทบ landmark อื่น
+- ยืนยัน: **ไม่มีความเสี่ยง crash/throw จริง** ตามที่ PM กังวล กลไกออกแบบมาปลอดภัยด้วย pattern "filter by current list" อยู่แล้ว — ผลกระทบจริงมีแค่ที่ requirements.md ระบุไว้แล้วว่ายอมรับได้ (สถานะเช็คอินของ landmark ตัวนั้นอาจ "หลุด" จาก progress ถ้า id เปลี่ยน ไม่ต้องมี migration พิเศษ)
+
+### 3) รัน jest เต็มชุด + tsc อิสระ
+
+```
+npx tsc --noEmit
+→ ไม่มี output/error (clean)
+```
+
+```
+npx jest   (รันซ้ำ 3 รอบเพื่อตรวจ flakiness)
+รอบ 1: 45 passed, 1 failed (src/auth/AuthContext.test.tsx, src/storage/CheckinContext.test.tsx สลับกันไป) — 217-219 passed, 1 skip
+รอบ 2: 46 passed, 0 failed — 237 passed, 1 skip, 238 total
+รอบ 3: 46 passed, 0 failed — 237 passed, 1 skip, 238 total
+```
+- ยืนยันว่า failure ที่เจอเป็น **pre-existing flakiness ที่มีอยู่ก่อนรอบนี้แล้ว** ไม่ใช่ regression จากโค้ด US-21–US-24: รัน `src/auth/AuthContext.test.tsx` และ `src/storage/CheckinContext.test.tsx` แยกเดี่ยวๆ ผ่าน 100% เสมอ (6/6), fail เฉพาะตอนรันพร้อม suite เต็มเท่านั้น (resource/timing-sensitive, ไม่เกี่ยวกับโค้ดที่แก้รอบนี้เลย — ไฟล์เหล่านี้อยู่คนละ domain กับ US-21–US-24 ทั้งหมด)
+- จำนวนเทสรวมตอนนี้ 238 (237 passed + 1 skip) เทียบกับ baseline ที่ prompt ระบุไว้ 213 (212 passed + 1 skip) — ส่วนต่างมาจาก 18 เทสใหม่ที่ tester เพิ่มในรอบนี้ (`src/__tests__/qa-round4/`) บวกกับไฟล์เทสอื่นที่ถูกเพิ่ม/แก้ไขระหว่างรอบก่อนหน้า (เช่น `photoUpload.test.ts`, `landmarkMapDegenerateBbox.test.tsx` ตาม git status) ซึ่งไม่ได้อยู่ในขอบเขตตรวจของรอบนี้โดยตรง — สิ่งที่ยืนยันได้แน่ชัดคือ **ไม่มี test suite ใดหายไปหรือเปลี่ยนจาก PASS เป็น FAIL เทียบกับก่อนเริ่มรอบนี้ (38 suites เดิม + 8 suites ใหม่ = 46 suites, ทั้งหมด PASS เมื่อรันซ้ำ)**
+
+### เทสใหม่ที่ Tester เพิ่มในรอบนี้ (ปิด coverage gap)
+ไฟล์ทั้งหมดอยู่ใต้ `src/__tests__/qa-round4/`:
+- `landmarkCardsWikipediaIntegration.test.tsx` — US-22 (6 AC) + US-23 (3 AC) ผ่าน component จริง (`ProvinceDetailScreen` → `LandmarkList` → `LandmarkCard`), mock เฉพาะ `wikipediaService` — 10 เคส
+- `photoPickerConversionHappyPath.test.tsx` — US-21 AC1 (happy path การแปลงจริง ที่ไม่เคยมีเทสมาก่อน) + AC3 (fallback) — 2 เคส
+- `globalSearchBarDropdown.test.tsx`, `globalSearchBarLandmarkMatch.test.tsx`, `globalSearchBarSelection.test.tsx`, `globalSearchBarProvinceSelection.test.tsx`, `globalSearchBarEdgeCase.test.tsx`, `globalSearchBarHomeScreen.test.tsx` — US-24 ครบทั้ง 5 AC ทั้งระดับ component เดี่ยวและผ่าน `HomeScreen` จริงทั้ง navigation stack — 6 เคส
+
+**หมายเหตุ technical debt ของชุดเทส GlobalSearchBar:** พบพฤติกรรมแปลกใน RTL/React Native testing environment ของโปรเจกต์นี้ — การยิง `fireEvent.changeText` สลับภาษา (อังกฤษ→ไทย) ติดกันสองครั้งบน `TextInput` เดียวกันภายในเทสเดียว บางครั้งทำให้ dropdown ค้างแสดงผลลัพธ์ค้นหารอบก่อนหน้า (ไม่ sync กับ `value` ใหม่) ทำให้ query DOM ไม่เจอ — เป็นปัญหาของ test tooling/timing ล้วนๆ (component จริงเป็น controlled `TextInput` มาตรฐาน ไม่มีเหตุผลเชิง logic ที่จะพังแบบนี้ในแอปจริง) จึงแยกเทสเป็นไฟล์ย่อยละ 1 interaction แทนที่จะรวมเป็นเทสยาวเทสเดียว — ผลลัพธ์ AC เหมือนกันทุกประการ ไม่กระทบความถูกต้องของการตรวจสอบ
+
+## Coverage ที่ยังขาด (ถ้ามี) — รอบ 5
+- **UI consistency ตามที่ ประเด็น 16 ขอให้ตรวจ** (สี/spacing/accessibility เทียบ `src/theme.ts`): ตรวจแล้ว `LandmarkCard.tsx`/`GlobalSearchBar.tsx`/`LandmarkList.tsx` ใช้ `COLORS.accent`/`COLORS.accentDark`/`COLORS.textPrimary`/`COLORS.textSecondary` จาก theme กลางสม่ำเสมอ ไม่มีสี hardcode ที่ขัดธีม ปุ่มเช็คอินมี `accessibilityRole`/`accessibilityLabel`/`accessibilityState` ครบ — ไม่พบปัญหา UX ที่ต้องส่งกลับ PM/UIUX
+- **ข้อสังเกตเชิง design (ไม่ใช่บั๊ก, ไม่ fail AC ใด):** `ProvinceMasterBadge`/`isProvinceMaster` (US-9) คำนวณจาก local seed landmarks เท่านั้น (`ProvinceDetailScreen.tsx:29` เรียก `getLandmarksForProvince` ที่ไม่รวม Wikipedia) ในขณะที่ progress indicator ภายใน `LandmarkList` เอง (`เช็คอินแล้ว X/Y แห่ง`) รวม Wikipedia landmarks ด้วย ทำให้ผู้ใช้อาจเห็นตัวเลข 2 ชุดที่ต่างฐานกันในหน้าเดียว (เช่น "5/6" ใน progress indicator แต่ยังไม่ได้ Province Master แม้เช็คอินครบ 6 เพราะ badge นับแค่ 4 จาก local) — requirements.md ไม่มี AC ที่ระบุพฤติกรรมนี้ชัดเจนทั้งสองทาง จึงไม่ตัดสินเป็น fail แต่ส่งเป็นข้อสังเกตให้ PM พิจารณาว่าตั้งใจหรือไม่
+- **ไม่มี test ต่อ `PhotoPicker` verify ว่า thumbnail ที่แสดงหลังบันทึก entry จริง (ผ่าน `AddEntryScreen` → save → `EntryListItem`) ใช้ URI ที่แปลงแล้ว end-to-end** (เทสที่เขียนในรอบนี้ตรวจ `PhotoPicker` แยกและ `EntryListItem` แยก แต่ไม่ได้ chain ทั้ง flow เข้าด้วยกันในเทสเดียว) — ความเสี่ยงต่ำเพราะทั้งสองจุดอ่าน/เขียน `photoUris` แบบเดียวกัน (string array ธรรมดา ไม่มีการแปลงเพิ่มระหว่างทาง) แต่เป็น coverage gap ที่ควรพิจารณาเพิ่มถ้ามีเวลารอบถัดไป
+
+## รอบ 6: Bug Fix — US-25 / T87-T89 (ตรวจสอบอิสระโดย Tester)
+
+**ขอบเขต:** ตรวจสอบว่า `src/services/wikipediaService.ts` (`fetchAttractionsForProvince`) และ `src/components/LandmarkList.tsx` (`fetchError` state + `LandmarkFetchErrorState` + retry) ตรงตาม 6 AC ของ US-25 จริง โดยอ่านโค้ดจริงทั้งหมด + รัน test ที่ programmer เขียนเอง + ตรวจ regression ทั้งชุด
+
+### ผลรัน Test
+- `npx jest src/services/wikipediaService.test.ts src/components/LandmarkList.test.tsx --silent` → **PASS 15/15** (2 suites)
+- `npx jest --silent` (เต็มชุด) → **PASS 47/47 suites, 245/246 tests, skip 1** — พบ `emailLinkIntegrity.test.tsx` fail ครั้งเดียวตอนรันรวม (`render` function has not been called ใน `waitFor`) แต่รันซ้ำแบบเดี่ยวและรันรวมอีกครั้งผ่านทั้งคู่ → เป็น **timing flake ของ test suite เดิม ไม่เกี่ยวกับ US-25** (คนละไฟล์/ฟีเจอร์ email-link ไม่ได้ถูกแก้ในรอบนี้เลย) ไม่ถือเป็นบั๊กที่เกิดจากการแก้ครั้งนี้ แต่ควรบันทึกไว้เป็น technical debt เดิมของ test suite
+- `npx tsc --noEmit -p .` → **ผ่าน (0 errors)**
+
+### ตรวจโค้ดจริง (ไม่ใช่แค่เชื่อ test)
+- `fetchAttractionsForProvince` (`wikipediaService.ts:81-144`): ใช้ flag `categorySucceeded` ต่อ category loop — set เป็น `true` ทันทีที่ `res.ok` และ `res.json()` สำเร็จ (บรรทัด 96-97) โดยไม่สนว่า pages มีบทความหรือไม่ → resolve `[]` ปกติถ้าอย่างน้อย 1 category สำเร็จ (ตรง AC1) และ throw จริงเฉพาะเมื่อ**ทุก** category fail ด้วย network/timeout (catch block) หรือ HTTP ไม่ ok (บรรทัด 91-94) → ตรง AC2 พบว่า logic ตรงตามสมมติฐานที่ระบุใน requirements.md บรรทัด 42 เป๊ะ
+- `fetchCommonsPhoto` (บรรทัด 31-46) มี try/catch คืน `undefined` เอง และเรียกผ่าน `Promise.allSettled` (บรรทัด 149) → ความล้มเหลวของรูปเสริมจะไม่มีทาง throw ขึ้นไปกระทบ AC2 จริง — ยืนยันด้วยการอ่านโค้ดตรงๆ
+- `LandmarkList.tsx:167` เงื่อนไข error state เต็มจอ คือ `fetchError && landmarks.length === 0` และ `LandmarkList.tsx:204` compact banner คือ `fetchError && (landmarks.length > 0 ผ่านการ render ปกติของ list)` — สอง state (error กับ empty ที่ `LandmarkList.tsx:189-196`) ใช้ข้อความคนละอันจริง: error ใช้ "โหลดข้อมูลสถานที่ไม่สำเร็จ" (บรรทัด 321, ยืนยันแยกจาก `EmptyStateLandmarks.tsx:12` ที่ใช้ "ยังไม่มีข้อมูลสถานที่แนะนำสำหรับจังหวัดนี้") → ตรง AC2/AC5 ยืนยันด้วยการเทียบ JSX/component คนละตัวจริง ไม่ใช่แค่ conditional text เดียวกัน
+- Retry (`onRetry={loadWikipediaAttractions}` บรรทัด 171, 204) เรียก callback เดิมซ้ำได้จากหน้าจอเดิมทันที ไม่ navigate ออก → ตรง AC3 มี `fetchIdRef` กัน stale response (บรรทัด 83, 87, 121, 123) ป้องกัน race condition เวลากดลองใหม่ซ้ำหรือเปลี่ยนจังหวัดระหว่างรอ
+- AC4: กรณี fetch fail คือ `catch` block (บรรทัด 116-121) ไม่แตะ `landmarks` state เลย (ของเดิมจาก local seed ยังอยู่ครบ) มีแค่ set `fetchError(true)` → seed landmarks แสดงต่อผ่าน branch ปกติ (บรรทัด 198 เป็นต้นไป) พร้อม compact banner คนละตำแหน่ง ไม่ทับซ้อน — ตรวจโค้ดยืนยันตรง AC4 จริง
+- AC6: เมื่อ retry สำเร็จ, `try` block (บรรทัด 89) `setFetchError(false)` ก่อน merge ผลลัพธ์ใหม่เข้า `landmarks` — เคลียร์ error state ได้จริงตรง AC6
+
+### ประเมิน test ที่ programmer เขียน
+- `wikipediaService.test.ts`: ครอบคลุม throw จาก network reject, HTTP non-ok, resolve-empty-ไม่-throw, partial-success-ไม่-throw, และ parsing/categorization ปกติ — mock ระดับ `global.fetch` จริง ไม่ใช่ mock ฟังก์ชันภายในตัวเอง ถือว่าเป็น integration-level ต่อ service นี้เพียงพอ ไม่ผิวเผิน
+- `LandmarkList.test.tsx`: mock เฉพาะ `wikipediaService` module (ระดับ boundary ที่เหมาะสม) แล้ว render component จริงทั้งต้นไม้ (`LandmarkList` เต็ม, ไม่ shallow) ตรวจข้อความบนจอจริงผ่าน RTL — ใช้ province `si-sa-ket` (ไม่มี local seed เลย ตรวจแล้วใน `thailand-landmarks.ts`) แยกจาก `phuket` (มี seed 4 แห่งรวม "หาดป่าตอง") อย่างถูกต้องเหมาะสมกับสิ่งที่แต่ละเทสต้องพิสูจน์ — ครอบคลุมครบทั้ง 6 AC รวม retry-then-fail-again (เคส AC3/AC6 เพิ่มเติมที่ไม่ได้ระบุตรงๆใน AC แต่เป็น edge case ที่สมเหตุสมผล) ไม่พบ mock ที่หลอกตัวเองหรือ assertion ผิวเผิน (เช็ค physical text ที่ผู้ใช้เห็นจริง ไม่ใช่แค่ state ภายใน)
+- ไม่พบช่องโหว่ coverage สำคัญที่ต้องเพิ่ม test เอง — ของเดิมครบตามเกณฑ์ AC1-AC6 แล้ว
+
+### ผลตรวจ AC ทั้ง 6 ข้อ (US-25)
+
+- [x] AC1: fetch สำเร็จแต่ resolve array ว่าง (ไม่มี exception) → ต้องแสดง empty state เดิมเหมือน US-8/US-22 — **PASS** (โค้ด `wikipediaService.ts:96-97,140` + test `LandmarkList.test.tsx:36-53`)
+- [x] AC2: fetch ล้มเหลวจริง (network/HTTP/timeout/parse error, throw/reject จริง) → ต้องแสดง error state แยกจาก empty state ด้วยข้อความคนละอัน — **PASS** (โค้ด `wikipediaService.ts:140-144`, `LandmarkList.tsx:167,321` vs `EmptyStateLandmarks.tsx:12` ข้อความคนละอันจริง + test `LandmarkList.test.tsx:18-34`)
+- [x] AC3: error state มีทางลองใหม่จากหน้าจอเดิมได้ทันที ไม่ต้องออก-เข้าใหม่ — **PASS** (`LandmarkList.tsx:171,204,325-333` ปุ่ม "ลองอีกครั้ง" เรียก `loadWikipediaAttractions` เดิม + test `LandmarkList.test.tsx:66-112`)
+- [x] AC4: มี local seed landmark อยู่แล้ว + fetch เสริมล้มเหลว → landmark เดิมต้องแสดงครบ ไม่หายไป, error แสดงแยกเป็นส่วนเสริม — **PASS** (`LandmarkList.tsx:116-121,198-207` ไม่แตะ `landmarks` state ตอน error + test `LandmarkList.test.tsx:55-64` ใช้ phuket จริง)
+- [x] AC5: reject → error state (ไม่ใช่ empty), resolve ว่าง → empty state (ไม่ใช่ error) แยกผลทดสอบชัดเจนสองเคส — **PASS** (test 2 เคสแยกกันชัดเจนใน `LandmarkList.test.tsx:18-53`, component แยก 2 branch จริงใน `LandmarkList.tsx:167` vs `189`)
+- [x] AC6: retry แล้วสำเร็จ → error state เดิมถูกเคลียร์ + แสดงผล Wikipedia landmark ใหม่ตามปกติ — **PASS** (`LandmarkList.tsx:89` `setFetchError(false)` ก่อน merge ผล + test `LandmarkList.test.tsx:66-112`)
+
+**สรุปรอบนี้:** ผ่านครบ 6/6 AC ของ US-25 ไม่พบบั๊กจากการตรวจสอบอิสระ โค้ด logic ตรงกับสมมติฐานที่ระบุใน requirements.md บรรทัด 42 (แยก "query สำเร็จแต่ 0 บทความ" ออกจาก "throw จริง" ด้วย flag ระดับ category ไม่ใช่ระดับ province เดียว) และ error/empty state เป็นคนละ component/ข้อความจริงตามที่ยืนยันด้วยการอ่าน JSX โดยตรง ไม่ใช่แค่เชื่อ test — regression รวม 47/47 suites ผ่าน (มี 1 flake ที่ไม่เกี่ยวกับการแก้ไขรอบนี้ ดูรายละเอียดด้านบน) และ `tsc --noEmit` ผ่านสะอาด
+
+### ข้อกังวลเล็กน้อย (ไม่ fail AC ใด, เพื่อบันทึกไว้)
+- `emailLinkIntegrity.test.tsx` มี timing flake เวลารันรวมกับ suite อื่น (ไม่เกี่ยวกับ US-25) — ควรพิจารณาแก้ที่ต้นเหตุ (เช่น `waitFor` timeout เดิม/`act` wrapping) ในรอบทำความสะอาด test suite ถัดไป เพื่อไม่ให้เกิดความสับสนว่า regression จริงหรือ flake

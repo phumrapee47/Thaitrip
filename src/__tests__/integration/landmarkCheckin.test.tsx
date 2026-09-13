@@ -13,6 +13,15 @@ import { CheckinProvider } from '../../storage/CheckinContext';
 jest.mock('../../storage/db');
 const dbMock = require('../../storage/db');
 
+// T87 / US-25: fetchAttractionsForProvince now throws on a real fetch
+// failure instead of silently resolving to []. This suite runs without
+// network access, so mock it to genuinely succeed with 0 results — that is
+// what "chaiyaphum has zero curated landmarks" below is meant to simulate
+// (a real successful-but-empty Wikipedia query), not a network failure.
+jest.mock('../../services/wikipediaService');
+const wikipediaServiceMock = require('../../services/wikipediaService');
+wikipediaServiceMock.fetchAttractionsForProvince.mockResolvedValue([]);
+
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 function TestApp({ provinceId }: { provinceId: string }) {

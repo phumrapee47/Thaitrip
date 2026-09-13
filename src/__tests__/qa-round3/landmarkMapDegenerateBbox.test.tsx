@@ -74,15 +74,24 @@ describe('LandmarkMap degenerate bounding box (single-point province) through th
     await render(<TestApp />);
     await waitFor(() => expect(screen.getByText('เช็คอินแล้ว 0/1 แห่ง')).toBeTruthy());
 
-    const point = screen.getByLabelText('จุดเดียวของจังหวัด, ยังไม่เช็คอิน');
+    // Advanced UI/UX upgrade: the map is behind a card/map toggle now, not
+    // shown in the first fold by default.
+    fireEvent.press(screen.getByLabelText('มุมมองแผนที่'));
+
+    const point = screen.getByLabelText('จุดเดียวของจังหวัด, ยังไม่ได้เช็คอิน');
     expect(point).toBeTruthy(); // rendered at all — no NaN/crash for a single-landmark bounding box
 
     fireEvent.press(point);
     await waitFor(() => expect(screen.getByText('เช็คอินแล้ว 1/1 แห่ง')).toBeTruthy());
+    await waitFor(() => expect(screen.getByLabelText('จุดเดียวของจังหวัด, เช็คอินแล้ว')).toBeTruthy());
 
     // Cross-checked against the underlying storage mock, keyed by the same id.
     expect(dbMock.__getCheckinStore()).toContainEqual(
       expect.objectContaining({ landmarkId: 'chaiyaphum-solo-landmark', provinceId: 'chaiyaphum', visited: true })
     );
+
+    // Switching to card mode shows the SAME checked-in state via the list row.
+    fireEvent.press(screen.getByLabelText('มุมมองการ์ด'));
+    await waitFor(() => expect(screen.getByLabelText('จุดเดียวของจังหวัด, เช็คอินแล้ว')).toBeTruthy());
   });
 });

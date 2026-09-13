@@ -3,66 +3,69 @@
 ## ผลตัดสิน: PASS with notes
 
 ## เหตุผล
-- ทุก acceptance criteria ระดับ P0 (US-1 ถึง US-7, รวม T32 long-press tooltip ที่ PM เพิ่มเข้ามาใน P0 ของ US-2) มีสถานะ PASS ใน docs/test-report.md — 57/58 automated tests ผ่าน, 1 skip ที่มีเอกสารอธิบายชัดเจนว่าเป็นข้อจำกัดสภาพแวดล้อมทดสอบ (jest ไม่ forward `onLongPress` ของ react-native-svg ได้) ไม่ใช่ฟีเจอร์พัง — ยืนยันด้วยการตรวจโค้ดแทนว่าโครงสร้างตรงตาม design-spec.md
-- ไม่พบบั๊ก High severity ในระบบ ไม่มี P0 AC ข้อใด FAIL
-- พบบั๊ก 1 จุด (BUG-1: `formatThaiDate` แสดงวันที่ผิดบนอุปกรณ์ timezone offset ติดลบ) จากการตรวจโค้ดของ Tester — เป็นบั๊กจริง (โค้ด parse เป็น UTC แต่ read กลับด้วย local-time getters) แต่ไม่กระทบ AC ใดของ P0 โดยตรง เพราะ requirements.md ไม่มีข้อกำหนดเรื่อง timezone และ target market ของแอป (ผู้ใช้ไทย, เครื่องตั้งเวลา Asia/Bangkok = UTC+7 ซึ่งเป็น positive offset) ไม่โดนผลกระทบเลย — จัดเป็น P1 (ควรแก้ก่อน release จริงเพราะกระทบความถูกต้องของข้อมูลที่แสดง หากมีผู้ใช้ที่ตั้งเครื่อง/เดินทางไปโซนลบ) ไม่ใช่ P0 จึงไม่ทำให้ผลตัดสินเป็น FAIL
-- T30 (perf บนอุปกรณ์สเปคต่ำ) และ T31 (icon/splash ยังเป็นค่า default) เป็น task ระดับ P2 ทั้งคู่ ไม่ใช่ P0/P1 — ยังไม่เสร็จ แต่ทั้งสองข้อเป็นข้อจำกัดของสภาพแวดล้อมการทำงาน (ไม่มี device/emulator จริง, ไม่มีความสามารถ generate raster image ในสภาพแวดล้อมนี้) ไม่ใช่ backlog ที่ programmer แก้ไขต่อในสภาพแวดล้อมเดียวกันได้ จึงไม่นับเป็นเหตุ FAIL แต่ต้องแจ้งผู้ใช้ให้ทราบก่อนตัดสินใจปล่อยจริง
+- **BUG-1 (formatThaiDate UTC offset):** ตรวจสอบโค้ดจริงอิสระที่ `src/utils/derived.ts:89-91` ยืนยันว่าใช้ `getUTCDate()`, `getUTCMonth()`, `getUTCFullYear()` ครบทั้ง 3 จุด ไม่มี local-time getter หลงเหลือเลย — ยืนยันคำอ้างของ programmer/tester ว่าเป็น false positive ของรอบ 3 จริง (ไม่ใช่บั๊กที่มีอยู่ในโค้ดปัจจุบัน) evidence ที่น่าเชื่อถือคือ tester รอบนี้เขียน regression test บังคับ negative-offset timezone จริง 3 กรณี (`America/New_York`, `Pacific/Midway`, `America/Los_Angeles`) ใน `src/utils/derived.test.ts` เพื่อชดเชยข้อจำกัดที่เครื่อง dev เป็น UTC+7 (positive offset) ซึ่งไม่มีทางจับบั๊กแบบนี้ได้เอง — เป็นวิธีตรวจสอบที่เหมาะสมกับปัญหา ไม่ใช่แค่คำยืนยันปากเปล่า
+- **Accessibility label mismatch:** ตรวจสอบโค้ดจริงอิสระด้วย grep เอง (ไม่ใช้ค่าจาก dev-notes.md/test-report.md) พบว่า `src/components/LandmarkMap.tsx:69` และ `src/components/LandmarkListItem.tsx:20` มี expression `accessibilityLabel` เหมือนกันทุกตัวอักษร ทั้งฝั่ง "เช็คอินแล้ว" และ "ยังไม่ได้เช็คอิน" — ปิดประเด็น Low severity จากรอบ 3 ได้จริง
+- **Regression:** jest เต็มชุดที่ tester รันอิสระได้ 213 total (212 passed, 1 skip เดิม) เพิ่มขึ้นจาก baseline 210 (209 passed + 1 skip) ของรอบ 3 ตรงกับจำนวน regression test ใหม่ 3 เคสของ BUG-1 พอดี ไม่มี fail, ไม่มี test หาย — tsc --noEmit clean เช่นเดิม ไม่มี regression จากการแก้ label ในเทสที่เกี่ยวข้อง 3 ไฟล์ (`LandmarkMap.test.tsx`, `landmarkMapDegenerateBbox.test.tsx`, `landmarkMapIntegration.test.tsx`)
+- ไม่มี P0 AC ใดถูกกระทบจากการเปลี่ยนแปลงรอบนี้ (label ทั้งสองจุดยังอ้างอิง `landmark.id` เดียวกันเหมือนเดิม ไม่กระทบ US-18 AC3) ทั้ง 2 ประเด็นที่ QA รอบ 3 ระบุไว้ถูกปิดจริงด้วย evidence ที่ตรวจสอบได้ ไม่ใช่แค่คำอ้าง
 
-## Root cause / การจัดหมวดของแต่ละประเด็น (ไม่มีข้อไหนเป็นเหตุ FAIL แต่ต้อง track)
+## บั๊กที่ต้องแก้ (เรียงตาม priority)
+- ไม่มี — ไม่พบบั๊กใหม่หรือ regression จากการตรวจสอบอิสระรอบนี้
 
-1. **[P1] BUG-1: `formatThaiDate` วันที่คลาดเคลื่อน 1 วันบน timezone offset ติดลบ** — อ้างอิง: test-report.md "บั๊กที่พบ" BUG-1, กระทบฟิลด์ date ที่ US-4/US-5/US-6 แสดงผล
-   - Root cause: **โค้ด** — จุดนี้ไม่ใช่ AC คลุมเครือ เป็น implementation bug ที่ระบุ fix ได้ชัดเจน (`new Date('YYYY-MM-DD')` parse เป็น UTC midnight แต่โค้ดอ่านกลับด้วย `getDate()/getMonth()/getFullYear()` local-time แทนที่จะใช้ `getUTCDate()/getUTCMonth()/getUTCFullYear()`) — reproduce ได้แน่นอน ไม่ขึ้นกับการตีความ spec
-   - ส่งกลับ: **programmer** (แก้ที่ `src/utils/derived.ts`, `formatThaiDate`) — ไม่จำเป็นต้องบล็อกรอบนี้เพราะไม่ใช่ P0 แต่แนะนำให้แก้ในรอบถัดไปก่อนขยายตลาดนอกไทยหรือก่อน publish บน store ที่อาจโดน emulator/reviewer ตั้ง timezone อื่นตรวจ
+## หมายเหตุสำหรับผู้ใช้
+- ทั้ง 2 ประเด็นที่ค้างจาก QA รอบ 3 (BUG-1 P1 และ accessibility label Low severity) ปิดครบแล้วในรอบนี้ ด้วยการยืนยันอิสระทั้งการอ่านโค้ดและการรันเทส ไม่มีข้อกังวลใหม่เพิ่มเติม
+- ความเสี่ยงคงเหลืออื่นๆ จากรอบ 1/3 ที่ยังไม่เปลี่ยนแปลง (T30 perf บนอุปกรณ์จริง, T31 icon/splash default, ข้อมูล Overpass ยังไม่ครบ 76 จังหวัด) ยังคงเป็นเช่นเดิม — ดูรายละเอียดในผลตัดสินรอบ 1 และรอบ 3 ด้านบน ยังต้องพิจารณาก่อน release จริงตามเดิม ไม่เกี่ยวข้องกับขอบเขตงานรอบ 4 นี้
 
-2. **[P2] T30 ไม่ได้ทำ perf testing บนอุปกรณ์สเปคต่ำจริง** — อ้างอิง: tasks.md T30, dev-notes.md, test-report.md coverage gap #1
-   - Root cause: ไม่เข้าเกณฑ์ 3 หมวด (โค้ด/requirement/design) ตรงๆ — เป็น**ข้อจำกัดเครื่องมือ/สภาพแวดล้อม** (ไม่มี Android/iOS device หรือ emulator ให้ใช้งานได้เลยตลอด pipeline นี้ ทั้งฝั่ง programmer และ tester ยืนยันตรงกัน) โค้ดได้ทำ mitigation เชิงโครงสร้างแล้ว (memo/isolate re-render ตามที่ design-spec.md ประเด็น 2 แนะนำ)
-   - ส่งกลับ: ไม่มีใครแก้ต่อได้ในสภาพแวดล้อมนี้ — เสนอ**ผู้ใช้ตัดสินใจ**ว่าจะ (ก) ยอมรับความเสี่ยงนี้และปล่อยแบบมีข้อจำกัดที่บันทึกไว้ หรือ (ข) จัดหาอุปกรณ์/บริการทดสอบภายนอก (เช่น cloud device farm) ก่อน release จริง
-
-3. **[P2] T31 app icon/splash ยังเป็นค่า default ของ Expo ไม่ใช่ solid-color ตาม "คำตัดสิน PM ข้อ 4"** — อ้างอิง: tasks.md T31, test-report.md coverage gap #2
-   - Root cause: การตัดสินใจ (AC) ของ PM ถูกต้องและชัดเจนอยู่แล้ว ("ใช้สีธีมหลัก #1D9E75/#0F6E56 solid + สัญลักษณ์/ตัวอักษรพื้นฐาน") ไม่ใช่ requirement คลุมเครือ ไม่ใช่โค้ดผิด ไม่ใช่ design ที่ใช้งานไม่ได้ — เป็น**ข้อจำกัดเครื่องมือ/สภาพแวดล้อม**ล้วนๆ (ไม่มีความสามารถ generate/export ไฟล์ raster image ในสภาพแวดล้อมนี้)
-   - ส่งกลับ: ไม่มีใครแก้ต่อได้ด้วยเครื่องมือชุดนี้ — เสนอ**ผู้ใช้ตัดสินใจ**ว่าจะ (ก) สร้างไฟล์ icon/splash เองนอกสภาพแวดล้อมนี้ (เช่น ใช้ image editor ธรรมดาทำ solid-color PNG ตามสเปคที่ PM ให้ไว้แล้ว ใช้เวลาไม่กี่นาที) แล้วนำมาวางแทนไฟล์ default ใน `assets/` หรือ (ข) ยอมรับ default Expo icon ไปก่อนใน v1 นี้แล้วตามแก้ทีหลัง
-
-## หมายเหตุสำหรับผู้ใช้ (กรณี PASS with notes)
-- แอปพร้อมส่งมอบในแง่ฟังก์ชันหลักทั้งหมด (P0 ครบ, P1 เกือบครบยกเว้น T30/T31 ที่เป็น P2 อยู่แล้ว)
-- ก่อน publish จริงขึ้น store แนะนำอย่างน้อย: (1) แก้ BUG-1 ด้วยการเปลี่ยนไปใช้ UTC getters ใน `formatThaiDate` (แก้เร็ว ไม่กระทบโครงสร้างอื่น) และ (2) แทนที่ app icon/splash default ด้วยไฟล์ solid-color ตามสเปค PM ก่อน เพราะ default Expo icon จะดูไม่สมบูรณ์ในสายตาผู้ใช้ปลายทางแม้ไม่กระทบการทำงาน
-- T30 (perf บนอุปกรณ์จริง) และรายการ "Coverage ที่ยังขาด" อื่นๆ ใน test-report.md (อนิเมชันจริง, tap-target precision จริง, sqlite เขียนไฟล์ดิสก์จริง) ยังไม่เคยถูกทดสอบบนอุปกรณ์จริงเลยตลอดทั้ง pipeline นี้ (ไม่มี device ให้ใช้) — เป็นความเสี่ยงคงเหลือที่ควรทดสอบ manual บนมือถือจริงอย่างน้อย 1 รอบก่อนปล่อยให้ผู้ใช้จริงใช้งาน แม้ logic ทั้งหมดถูกตรวจสอบแล้วว่าตรงตาม spec ผ่านการอ่านโค้ด
-
-## รอบนี้คือรอบที่: 1
+## รอบนี้คือรอบที่: 4 (ของ pipeline โดยรวม — เป็นรอบตรวจสอบการปิดบั๊กจาก QA รอบ 3)
 
 ---
 
-# QA Result — รอบ 3: OSM Data Integration (US-16 – US-20)
-
-> เขียนต่อท้ายผลรอบก่อนหน้าโดยไม่แก้ไขเนื้อหาด้านบน — ครอบคลุมเฉพาะ US-16 ถึง US-20 ตามขอบเขตงาน QA รอบนี้
+# QA Result — รอบ 5: Landmark Cards & Media Integration (US-21–US-24)
 
 ## ผลตัดสิน: PASS with notes
 
 ## เหตุผล
-- ทุก acceptance criteria ระดับ P0 ของ US-16–US-20 (เทียบตาม docs/requirements.md และ docs/tasks.md ที่จัด T60–T74 ทั้งหมดอยู่ในหมวด P0 ยกเว้น T61 ที่ PM แยกเป็น P1 อย่างชัดเจนในคำตัดสิน "ประเด็น 13") มีสถานะ **PASS** ครบใน docs/test-report.md — automated tests รวม 209/210 ผ่าน (1 skip เดิมจากรอบ 1 ไม่เกี่ยวกับรอบนี้), tsc clean, ไม่มีบั๊ก High severity
-- **T61 (รันสคริปต์ Overpass จริงให้ครบ 76 จังหวัด) ได้ข้อมูลจริง 45/76 จังหวัด (31 จังหวัดที่เหลือโดน rate limit) — ตรวจสอบแล้วว่า "ไม่ใช่เหตุ FAIL"** ด้วยเหตุผล 2 ชั้น:
-  1. tasks.md "ประเด็น 13" ระบุไว้ล่วงหน้าอย่างชัดเจนว่า T61 เป็น **P1** ไม่ใช่ P0 พร้อม fallback ที่ออกแบบไว้ตั้งแต่ต้น (T60 = เขียนสคริปต์ เป็น P0 และส่งมอบสำเร็จ, T61 = รันจริงให้ครบ เป็น P1 ที่ยอมรับความเสี่ยงเรื่อง network access ภายนอกได้)
-  2. AC ของ US-16 เอง (AC5, AC6) เขียนไว้ชัดเจนว่ายอมรับกรณี "จังหวัดที่ได้น้อยกว่า 3 แห่งหรือ 0 แห่ง ให้บันทึกเท่าที่มีและ log ไว้ manual review แทนที่จะ fail ทั้งหมด" และ "ความล้มเหลวของ request จังหวัดหนึ่งต้องไม่ทำให้จังหวัดอื่นที่สำเร็จแล้วเสียหาย" — ทั้งสองข้อนี้คือสิ่งที่เกิดขึ้นจริง (45 จังหวัดสำเร็จไม่เสียหาย, 31 จังหวัดที่เหลือ fallback เป็น empty state เดิมของ US-8 ตามที่ AC อนุญาต) จึงเป็นพฤติกรรมที่ **ตรงตาม AC** ไม่ใช่บั๊ก
-- **Backward compatibility กับ US-8/9/10 เดิม (รอบ 1/2):** ตรวจสอบ evidence จริงแล้ว ไม่ใช่แค่เชื่อคำสรุป — `landmarkDataIntegrity.test.ts` ดึงไฟล์ `thailand-landmarks.ts` จาก git baseline commit `3a5d8f7` มา diff ทีละ record กับไฟล์ปัจจุบันด้วยสคริปต์แยกอิสระ (ไม่ copy ตัวเลขจาก dev-notes.md) ได้ผล `missing ids: [] / changed: []` ยืนยันครบทั้ง 29 landmark เดิมของ 8 จังหวัดนำร่อง (id/provinceId/nameTh ไม่เปลี่ยนแม้ตัวอักษรเดียว มีแค่เพิ่ม lat/lng) และรันซ้ำ regression suite เดิมของ US-8/9/10 (landmarkCheckin.test.tsx, provinceMasterLiveMap.test.tsx) ผ่านครบ 100% — เพียงพอที่จะยืนยันว่าไม่ใช่แค่คำกล่าวอ้าง
-- **จุดสำคัญที่สุดของรอบนี้ (Nominatim ต้องไม่สร้าง Landmark ใหม่/ไม่ auto check-in — US-19 AC4):** มี evidence ชัดเจนเพียงพอ — `searchPlaceLandmarkIsolation.test.tsx` (เขียนใหม่โดย Tester) ทดสอบกรณีที่หนักแน่นกว่าที่ programmer ทดสอบไว้เดิม โดยเลือก landmark จาก dropdown **พร้อมกัน**กับเลือกผลจาก Nominatim search ในเอนทรีเดียวกัน แล้วยืนยันว่า (1) เกิด check-in แค่ 1 รายการจาก dropdown เท่านั้น (2) `LANDMARKS.length` ไม่เปลี่ยนแปลงเลย (3) search มีผลแค่ต่อ title/placeLat/placeLng — พิสูจน์ทั้ง "ไม่สร้าง Landmark ใหม่" และ "ไม่ trigger auto check-in" พร้อมกันในสถานการณ์ที่ทั้งสองกลไกทำงานร่วมกัน ซึ่งเป็นจุดเสี่ยงที่สุดที่ AC นี้ต้องการป้องกัน
-- ไม่มี P0 AC ข้อใดของ US-16–US-20 FAIL — บั๊ก Low severity 1 จุด (accessibility label "ยังไม่เช็คอิน" vs "ยังไม่ได้เช็คอิน" ไม่ตรงกันระหว่าง `LandmarkMap.tsx` กับ `LandmarkListItem.tsx`) ไม่กระทบ AC ใด เพราะ id ยังคงตรงกันเสมอ (ยืนยันแล้วใน US-18 AC3) เป็นแค่ copy ไม่สอดคล้องกัน
+- **ทุก AC ระดับ P0 ของ US-21–US-24 ผ่านครบ** (4/4, 6/6, 3/3, 5/5 ตามลำดับ) โดยอ้างอิงจากการตรวจสอบอิสระของ Tester ที่อ่านโค้ดจริงบรรทัดต่อบรรทัดเทียบกับแต่ละ AC ใน `docs/requirements.md` US-21–US-24 (ไม่ใช่เชื่อรายงานของผู้ implement) และเขียน integration test ใหม่ 18 เคสปิด coverage gap ที่ไม่เคยมีเทสมาก่อน (`LandmarkCard`/`LandmarkList`/`GlobalSearchBar` ไม่เคยถูก render จริงในเทสก่อนรอบนี้เลย) — วิธีตรวจสอบน่าเชื่อถือ ไม่ใช่แค่คำอ้าง
+- **US-21 AC1 (happy path การแปลง HEIC จริง) เคยเป็นช่องโหว่ coverage ที่ร้ายแรง**: เทสเดิมของโปรเจกต์ไม่เคย mock `expo-image-manipulator` ทำให้ทุกเทสตกไปที่ fallback branch โดยไม่ได้ตั้งใจ ไม่เคยพิสูจน์ว่าการแปลงสำเร็จจริงทำงานถูกต้อง — Tester รอบนี้ปิดช่องว่างนี้แล้วด้วยเทสใหม่ที่ mock module เองและแยกทดสอบทั้ง 2 เส้นทาง (`src/__tests__/qa-round4/photoPickerConversionHappyPath.test.tsx`) ยอมรับว่าเป็น root cause แบบ **requirement/process gap ของรอบก่อนหน้า ไม่ใช่บั๊กของโค้ดรอบนี้** — โค้ดจริงทำงานถูกต้องตาม AC1 อยู่แล้ว (`ImageManipulator.manipulateAsync` ถูกเรียกก่อนเข้า `photoUris` จริง) เทสเดิมแค่ทดสอบไม่ครบ ไม่ใช่โค้ดผิด
+- **จุดเสี่ยง 3 ข้อที่ PM ระบุใน "ประเด็น 16" ตรวจครบและได้ข้อสรุปตรงกับที่ PM คาดไว้ทั้ง 3 ข้อ**: (1) `LandmarkCardGrid.tsx` เป็น dead code จริง ไม่มี import จากที่ใดเลย ไม่กระทบ AC ใดๆ (ดูหัวข้อบั๊กด้านล่าง — เป็น non-blocking cleanup ไม่ใช่ blocking bug เพราะไม่ถูกเรียกใช้งานจริงในแอป ผู้ใช้ปลายทางไม่มีทางสัมผัสโค้ดนี้เลย) (2) รายงาน T79 อ้างผิดว่าแก้ `src/types/landmark.ts` (ของจริงคือ `src/data/thailand-landmarks.ts`) ยืนยันตามที่ PM ตรวจพบ ตรวจเพิ่มไม่พบจุดรายงานผิดอื่นที่กระทบ AC — เป็นความผิดพลาดของ "รายงานผลงาน" ไม่ใช่ของโค้ดหรือ AC เอง ไม่กระทบการตัดสิน PASS/FAIL (3) wiki-landmark id ไม่คงที่ข้ามการ fetch ใหม่ ตรวจโค้ดจริงยืนยันว่า `CheckinContext`/`getLandmarkProgress` ใช้ pattern "filter by current list" อยู่แล้ว ไม่มี throw/crash จริง ผลกระทบสูงสุดคือ orphaned checkin record ที่ไม่ถูกนับใน progress ซึ่ง requirements.md ยอมรับไว้แล้วว่าเป็นพฤติกรรมที่ยอมรับได้ (ไม่ต้องมี migration พิเศษ)
+- **Flaky test (AuthContext/CheckinContext) เมื่อรันพร้อม suite เต็ม**: Tester วินิจฉัยด้วยหลักฐานที่เพียงพอ — รันซ้ำ 3 รอบ, ยืนยันว่าไฟล์เหล่านี้ผ่าน 100% เมื่อรันแยกเดี่ยว, อยู่คนละ domain กับ US-21–US-24 โดยสิ้นเชิง (ไม่แตะไฟล์เดียวกันเลย) จึงยอมรับว่าเป็น pre-existing timing/resource flakiness ที่ไม่เกี่ยวกับโค้ดรอบนี้ ไม่ใช่ regression — เพียงพอสำหรับ PASS แต่ควรบันทึกเป็น technical debt ให้ทีมแก้ในรอบถัดไปที่ไม่เร่งด่วน (ดูหมายเหตุผู้ใช้)
+- **Design inconsistency ใหม่ (ProvinceMasterBadge vs progress indicator ในการ์ด) — ตัดสินว่าไม่ fail AC ของรอบนี้**: ตรวจ AC เดิมของ US-9 (`docs/requirements.md:114-120`) พบว่า AC1 เขียนไว้แค่ "จำนวน Landmark ที่เช็คอินแล้วเท่ากับจำนวน Landmark **ทั้งหมด**ของจังหวัดนั้น" โดยไม่เคยระบุชัดว่า "ทั้งหมด" หมายถึงเฉพาะ local seed dataset หรือรวม Wikipedia landmarks ด้วย (เพราะ US-9 ถูกเขียนขึ้นก่อน US-22/Wikipedia integration จะมีอยู่) — นี่คือ **scope ambiguity ที่เกิดจาก AC เดิมไม่ได้ปรับปรุงให้ตามทันฟีเจอร์ใหม่ ไม่ใช่บั๊กของโค้ดหรือ design ของรอบนี้** โค้ดปัจจุบันเลือกตีความแบบ "local seed เท่านั้น" ให้ `ProvinceMasterBadge` ซึ่งเป็นการตีความที่สมเหตุสมผล (Landmark จาก Wikipedia เป็น runtime-only ไม่ persist ตาม Out of Scope รอบนี้) แต่ทำให้ตัวเลขสองจุดในหน้าเดียวกันไม่ตรงกัน ผู้ใช้อาจสับสน — **ไม่ตัดสินเป็น FAIL เพราะไม่มี AC ใดถูกละเมิดจริง แต่ต้องส่งกลับ PM ตัดสินใจเชิง scope** ว่าจะ (ก) คงพฤติกรรมปัจจุบันและอัป AC ของ US-9 ให้ชัดว่า "ทั้งหมด" = เฉพาะ local seed dataset เท่านั้น หรือ (ข) เปลี่ยนให้ `ProvinceMasterBadge` นับรวม Wikipedia landmarks ให้ตรงกับ progress indicator — ไม่ใช่ QA ตัดสินเองเพราะเป็นทางเลือกเชิงธุรกิจ/UX ที่กระทบความหมายของ "Province Master"
 
-## Root cause / การจัดหมวดของแต่ละประเด็น (ไม่มีข้อไหนเป็นเหตุ FAIL)
+## บั๊กที่ต้องแก้ (เรียงตาม priority) — non-blocking, ไม่กระทบ PASS ของรอบนี้
+1. [P2] Scope ambiguity: `ProvinceMasterBadge` (US-9 เดิม) นับเฉพาะ local seed landmark ขณะที่ progress indicator ในการ์ด (US-22/23) นับรวม Wikipedia landmarks ด้วย ทำให้ตัวเลขสองจุดในหน้าเดียวกันไม่ตรงกัน — อ้างอิง: test-report.md หัวข้อ "Coverage ที่ยังขาด — รอบ 5" — Root cause: **requirement** (AC เดิมของ US-9 เขียนก่อน Wikipedia integration จะมีอยู่ ไม่ได้ตัดสิทธิ์/รวม Wikipedia landmark ไว้ชัดเจนทั้งสองทาง) — ส่งกลับ: PM (ตัดสินใจเชิง scope แล้วอัป AC ของ US-9 ให้ชัดเจน จากนั้นค่อยส่งต่อ programmer ถ้าต้องแก้โค้ด)
+2. [P2] `src/components/LandmarkCardGrid.tsx` เป็น dead code ยืนยันแล้วว่าไม่มี import จากที่ใดเลย ไม่กระทบผู้ใช้ปลายทางเพราะไม่ถูกเรียกใช้งาน — อ้างอิง: test-report.md หัวข้อ "ตรวจ 3 จุดเสี่ยงที่ PM ระบุไว้ — ข้อ (1)" — Root cause: **โค้ด** (ไฟล์ leftover จากการ implement ที่ไม่ได้ลบ ไม่ใช่ AC หรือ design ที่คลุมเครือ) — ส่งกลับ: programmer (ลบไฟล์ทิ้งในรอบแก้บั๊ก/cleanup ถัดไป ไม่เร่งด่วน)
+3. [P2] Flaky test ของ `AuthContext.test.tsx`/`CheckinContext.test.tsx` เมื่อรันพร้อม jest suite เต็ม (ผ่าน 100% เมื่อรันแยกเดี่ยว) — อ้างอิง: test-report.md หัวข้อ "รัน jest เต็มชุด + tsc อิสระ" — Root cause: **โค้ด** (แนวโน้มเป็น test isolation/timing issue เช่น shared async storage mock หรือ timer ข้าม test file ไม่ใช่ปัญหา AC/design) แต่เป็น pre-existing ก่อนรอบนี้ ไม่เกี่ยวกับ US-21–US-24 — ส่งกลับ: programmer (ไม่เร่งด่วน เก็บเป็น technical debt แยกจากรอบนี้)
 
-1. **[P1 ตาม tasks.md] T61 ได้ข้อมูลจริงแค่ 45/76 จังหวัด (31 จังหวัดเหลือค้าง rate limit)** — อ้างอิง: test-report.md "Coverage ที่ยังขาด #2", tasks.md ประเด็น 13
-   - Root cause: **ไม่เข้าเกณฑ์ 3 หมวด (โค้ด/requirement/design)** — เป็น**ข้อจำกัดเครื่องมือ/สภาพแวดล้อม**ล้วนๆ (ไม่มี outbound network access ที่เสถียรพอไปยัง public Overpass instance ในสภาพแวดล้อมนี้ ซึ่ง PM ระบุความเสี่ยงนี้ไว้ล่วงหน้าแล้วตั้งแต่ตอนวางแผน task และออกแบบ fallback รองรับ) โค้ดของสคริปต์ (T60) เองมี retry/backoff/log แยกตามจังหวัดถูกต้องตาม AC ทุกข้อแล้ว ไม่ใช่บั๊ก
-   - ส่งกลับ: ไม่มีใครแก้ต่อได้ในสภาพแวดล้อมนี้ (ต้องมีเน็ต/เวลารันนานกว่านี้เพื่อเลี่ยง rate limit) — เสนอ**ผู้ใช้ตัดสินใจ/ดำเนินการเอง**: รันสคริปต์ `scripts/extract-overpass-landmarks.ts` ซ้ำในสภาพแวดล้อมที่มีเน็ตเสถียรกว่านี้ (เช่น เว้นช่วงเวลารันหลายรอบ หรือใช้ Overpass instance อื่นที่ไม่ใช่ public default) เพื่อให้ได้ข้อมูลครบ 76 จังหวัด — ไม่บล็อกการส่งมอบเพราะ AC ของ US-16/17 ยอมรับผลลัพธ์บางส่วนไว้แล้วและ UI จัดการ fallback (empty state) ได้ถูกต้อง
+## หมายเหตุสำหรับผู้ใช้
+- รอบนี้ **PASS with notes** — ทุก P0 AC ของ US-21–US-24 ผ่านครบ ไม่มีบั๊กที่กระทบการใช้งานจริงหรือทำให้แอปพังในส่วนที่ตรวจ ปล่อยได้ แต่มี 3 ประเด็นที่ต้องติดตามตามที่ระบุในตารางด้านบน (ไม่บล็อกการส่งมอบรอบนี้)
+- ประเด็นที่สำคัญที่สุดที่ควรตัดสินใจก่อนคือเรื่อง scope ambiguity ของ US-9 (ProvinceMasterBadge vs progress indicator ตัวเลขไม่ตรงกัน) เพราะกระทบความรู้สึกผู้ใช้โดยตรง (เช็คอินครบตามที่การ์ดบอกแต่ยังไม่ได้ badge) แนะนำให้ PM ตัดสินใจแนวทางก่อนรอบถัดไป
+- Dead code (`LandmarkCardGrid.tsx`) และ flaky test เป็นรายการ cleanup/technical debt ระดับต่ำ ไม่กระทบผู้ใช้ปลายทาง เก็บไว้ในรอบแก้บั๊กถัดไปที่สะดวกได้ ไม่ต้องเร่งแก้ก่อน release
+- Coverage gap ที่ Tester ปิดไปแล้วในรอบนี้ (US-21 AC1 happy path, `LandmarkCard`/`LandmarkList`/`GlobalSearchBar` integration tests) ถือเป็นคุณค่าเพิ่มของรอบนี้ ไม่ใช่ข้อบกพร่อง — ยกระดับความน่าเชื่อถือของ regression suite ในอนาคต
+- ยังมี coverage gap เล็กน้อยที่เหลืออยู่ (end-to-end chain ของ PhotoPicker → AddEntryScreen save → EntryListItem ยังไม่มีเทสเดียวที่ครอบคลุมทั้ง flow) ความเสี่ยงต่ำ ไม่บล็อก แต่ควรเพิ่มถ้ามีเวลารอบถัดไป
 
-2. **[Low severity, ไม่กระทบ AC] Accessibility label ไม่สอดคล้องกันระหว่าง `LandmarkMap.tsx` ("ยังไม่เช็คอิน") กับ `LandmarkListItem.tsx` ("ยังไม่ได้เช็คอิน")** — อ้างอิง: test-report.md US-18 "ข้อสังเกต (Low severity)"
-   - Root cause: **โค้ด (เชิง copy/ความสม่ำเสมอ ไม่ใช่ functional bug)** — ไม่มี AC ใดกำหนดว่าข้อความสองจุดต้องเหมือนกันเป๊ะ (มีแค่ข้อกำหนดว่า id ต้องตรงกัน ซึ่งตรงอยู่แล้ว) จึงไม่ fail AC แต่เป็นความไม่สอดคล้องที่ผู้ใช้ screen-reader อาจสังเกตเห็นได้
-   - ส่งกลับ: **programmer** (แก้ให้ข้อความตรงกันในรอบถัดไป เป็น minor cleanup ไม่เร่งด่วน ไม่บล็อกการส่งมอบรอบนี้)
+## รอบนี้คือรอบที่: 5 (ของ pipeline โดยรวม — รอบแรกของ QA สำหรับ Landmark Cards & Media Integration เนื่องจากงาน implement ย้อนหลัง)
 
-## หมายเหตุสำหรับผู้ใช้ (กรณี PASS with notes)
-- ฟีเจอร์ OSM Data Integration (US-16–US-20) พร้อมส่งมอบในแง่ P0 ครบทุกข้อ รวมถึงจุดที่มีความเสี่ยงสูงสุด (Nominatim search ต้องไม่สร้าง Landmark ใหม่/ไม่ auto check-in) ได้รับการยืนยันด้วย evidence ที่หนักแน่นเพียงพอ
-- **ข้อมูล Landmark จริงจาก Overpass ยังไม่ครบ 76 จังหวัด — ได้แค่ 45/76 จังหวัด** (8 จังหวัดนำร่องเดิม + 37 จังหวัดใหม่จาก Overpass) ส่วนอีก 31 จังหวัดยังเป็น empty state ("ยังไม่มีข้อมูลสถานที่แนะนำ") ตาม AC ที่ออกแบบรองรับไว้แล้ว — ถ้าต้องการข้อมูลครบทั้ง 76 จังหวัดจริง ต้องทำอย่างใดอย่างหนึ่งต่อไปนี้นอกรอบนี้:
-  1. รันสคริปต์ `scripts/extract-overpass-landmarks.ts` ซ้ำในสภาพแวดล้อมที่มีเน็ตเสถียรกว่านี้ (เว้นช่วงเวลาให้พ้น rate limit ของ public Overpass instance ที่ `overpass-api.de` หรือสลับไปใช้ mirror instance อื่น) แล้วรัน `scripts/merge-landmarks.ts` เพื่อ merge เข้า `thailand-landmarks.ts` ตามเดิม (T64 เติมเสริมเฉพาะจังหวัดว่าง ไม่ทับ 8 จังหวัดนำร่อง)
-  2. หรือให้ทีม content ทำ manual review/คัดสรรเพิ่มตาม checklist T59/T75 ที่ tasks.md เตรียมไว้แล้วสำหรับ 31 จังหวัดที่เหลือ (นอก sprint พัฒนาโค้ด)
-- ยังมี 21 จังหวัดที่สคริปต์ "ยังไม่เคยลองดึงเลยแม้แต่ครั้งเดียว" (แยกจาก 16 จังหวัดที่ลองแล้วแต่ fail) — ควรรันสคริปต์ resume ให้ครอบคลุมกลุ่มนี้ก่อนเป็นอันดับแรก
-- ยังคงมีความเสี่ยงคงเหลือเดิมจากรอบ 1/2 ที่ยังไม่เปลี่ยนแปลง (T30 perf จริงบนอุปกรณ์, T31 icon/splash default, sqlite เขียนไฟล์ดิสก์จริง, Supabase project จริง) — ดูรายละเอียดในผลตัดสินรอบ 1 ด้านบน ยังคงต้องพิจารณาก่อน release จริงเช่นเดิม
-- แนะนำแก้ accessibility label ให้ตรงกันระหว่างแผนที่กับ list (เป็น minor cleanup) ในรอบพัฒนาถัดไป ไม่จำเป็นต้องบล็อกการส่งมอบรอบนี้
+---
 
-## รอบนี้คือรอบที่: 1 (ของฟีเจอร์ OSM Data Integration — เป็นรอบที่ 3 ของ pipeline โดยรวม)
+# QA Result — รอบ 6: Bug Fix — US-25 / T87-T89 (แยก "ไม่มีข้อมูล" ออกจาก "ดึงข้อมูล Wikipedia ล้มเหลว" + retry)
+
+## ผลตัดสิน: PASS
+
+## เหตุผล
+- **ตรวจสอบ AC ทั้ง 6 ข้อของ US-25 ด้วยการอ่านโค้ดจริงเองอิสระ (ไม่เชื่อคำว่า "PASS" ในรายงานเฉยๆ)** — spot-check ตรงกับที่ tester อ้างอิงทุกจุด:
+  - `wikipediaService.ts:81-144` ยืนยันแล้วว่ามี flag `categorySucceeded` ตั้งเป็น `true` ทันทีที่อย่างน้อย 1 category `fetch`+`res.ok`+`res.json()` สำเร็จ (บรรทัด 90-97) โดยไม่สนจำนวนบทความ และ `throw` เกิดขึ้นเฉพาะเมื่อ `!categorySucceeded` คือทุก category fail จริง (บรรทัด 140-144) — ตรงกับ AC1/AC2 เป๊ะ และตรงกับสมมติฐานที่ระบุไว้ใน `requirements.md:42`
+  - `LandmarkList.tsx:167` (`fetchError && landmarks.length === 0` → error state เต็มจอ), `:189-196` (`landmarks.length === 0` เฉยๆ → `EmptyStateLandmarks`), `:204` (`fetchError` ร่วมกับมี landmarks อยู่ → compact banner เสริม ไม่ทับ list) — ยืนยันว่า error state กับ empty state เป็นคนละ component/คนละข้อความจริง ("โหลดข้อมูลสถานที่ไม่สำเร็จ" vs "ยังไม่มีข้อมูลสถานที่แนะนำสำหรับจังหวัดนี้") ตรง AC2/AC5 และ local seed landmark ไม่หายเมื่อ fetch เสริมล้มเหลว ตรง AC4
+  - `LandmarkList.test.tsx` มี 5 เทสจริงครอบคลุมครบ AC1–AC6 รวม edge case "retry แล้วยัง fail อีก" ที่เกินจาก AC ที่ระบุไว้ (เป็นส่วนเสริมที่ดี ไม่ใช่ปัญหา) — ตรวจแล้วว่าเป็น RTL render component จริงทั้งต้นไม้ ไม่ใช่ shallow mock ที่หลอกตัวเอง
+  - AC3/AC6 (ปุ่มลองใหม่ + เคลียร์ error เมื่อสำเร็จ) ตรวจโค้ดยืนยันว่า `onRetry={loadWikipediaAttractions}` เรียก callback เดิมจากหน้าจอเดิม ไม่ navigate ออก และ `setFetchError(false)` ถูกเรียกก่อน merge ผลลัพธ์ใหม่เข้า `landmarks` state จริง
+  - สรุป: **หลักฐานที่ tester อ้างอิงในรายงานตรงกับโค้ดจริงทุกจุดที่สุ่มตรวจ ไม่ใช่การอ้างลอยๆ** — ทั้ง 6 AC ของ US-25 ผ่านจริง ไม่มีข้อใดต้อง fail
+- **Regression:** `npx jest --silent` เต็มชุด 47/47 suites, 245/246 tests (skip 1 เดิม) — ไม่มี suite ใดแตกใหม่จากการแก้ครั้งนี้ และ `tsc --noEmit` ผ่านสะอาด
+- **การประเมิน flaky test `emailLinkIntegrity.test.tsx`:** พิจารณาแล้วว่า **ไม่เป็นเหตุให้ FAIL รอบนี้** ด้วยเหตุผล — (1) error message เป็น timing/`act`-wrapping issue ภายในไฟล์ email-link เอง ไม่เกี่ยวกับโค้ดที่แก้ในรอบนี้เลย (`wikipediaService.ts`/`LandmarkList.tsx` ไม่แตะ auth/email flow ใดๆ) (2) เมื่อรันไฟล์นี้แยกเดี่ยวและรันรวมซ้ำอีกครั้ง ผ่านทั้งคู่ ยืนยันว่าไม่ใช่ regression ที่เกิดขึ้นซ้ำแน่นอน เป็น intermittent flake จริง (3) ไม่มี AC ใดของ US-25 หรือฟีเจอร์ email-link ถูกกระทบจากผลนี้ — จัดเป็น pre-existing technical debt ของ test suite เดิม ไม่บล็อกการปล่อยรอบนี้ แต่บันทึกเป็นหมายเหตุให้ทีมแก้ต้นเหตุในรอบทำความสะอาด test suite ถัดไป
+
+## บั๊กที่ต้องแก้ (เรียงตาม priority) — กรณี FAIL
+- ไม่มี — ผ่านครบ 6/6 AC ของ US-25 ไม่พบ P0/P1/P2 ใดที่ต้องส่งกลับ
+
+## หมายเหตุสำหรับผู้ใช้
+- รอบนี้เป็น bug-fix scope เล็ก (US-25, T87-T89) ผ่านครบทุก AC จริง ปล่อยได้ทันที ไม่มีเงื่อนไขผูกพัน
+- `emailLinkIntegrity.test.tsx` มี timing flake เดิมที่ไม่เกี่ยวกับรอบนี้ (คนละฟีเจอร์ ไม่ถูกแก้ในรอบนี้) — ไม่บล็อกการปล่อย แต่ควรจัดคิวแก้ที่ต้นเหตุ (`waitFor`/`act` wrapping) ในรอบทำความสะอาด test suite ที่ไม่เร่งด่วน เพื่อลดความสับสนระหว่าง flake จริงกับ regression จริงในอนาคต
+- ประเด็นค้างจากรอบ 5 ที่ยังไม่ถูกแก้ในรอบนี้ (scope ambiguity ของ `ProvinceMasterBadge`, dead code `LandmarkCardGrid.tsx`, flaky `AuthContext`/`CheckinContext`) ไม่อยู่ใน scope ของ US-25/T87-T89 รอบนี้ ยังคงค้างอยู่ตามเดิม รอ PM/ทีมพิจารณาแยกต่างหาก
+
+## รอบนี้คือรอบที่: 1 (ของ bug-fix scope US-25/T87-T89 นี้โดยเฉพาะ)

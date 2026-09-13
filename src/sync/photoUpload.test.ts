@@ -36,9 +36,9 @@ describe('uploadPendingPhotos (T41 / US-13)', () => {
     dbMock.__seed([
       { id: 'e1', provinceId: 'phuket', date: '2026-01-01', title: 'A', notes: '', photoUris: ['file:///local/a.jpg'], tags: [] },
     ]);
-    const fetchBlob = jest.fn(() => Promise.resolve({} as Blob));
+    const readAsBase64 = jest.fn(() => Promise.resolve('ZmFrZQ=='));
 
-    const result = await uploadPendingPhotos({ fetchBlob });
+    const result = await uploadPendingPhotos({ readAsBase64 });
 
     expect(result).toEqual({ attempted: 1, uploaded: 1, failed: 0 });
     expect(dbMock.__getStore()[0].photoUris).toEqual(['https://cdn.example.com/e1/0-a.jpg']);
@@ -59,7 +59,7 @@ describe('uploadPendingPhotos (T41 / US-13)', () => {
       },
     ]);
 
-    const result = await uploadPendingPhotos({ fetchBlob: jest.fn() });
+    const result = await uploadPendingPhotos({ readAsBase64: jest.fn() });
 
     expect(result).toEqual({ attempted: 0, uploaded: 0, failed: 0 });
     expect(stub.__internals.upload).not.toHaveBeenCalled();
@@ -72,7 +72,7 @@ describe('uploadPendingPhotos (T41 / US-13)', () => {
       { id: 'e1', provinceId: 'phuket', date: '2026-01-01', title: 'A', notes: '', photoUris: ['file:///local/a.jpg'], tags: [] },
     ]);
 
-    const result = await uploadPendingPhotos({ fetchBlob: jest.fn(() => Promise.resolve({} as Blob)) });
+    const result = await uploadPendingPhotos({ readAsBase64: jest.fn(() => Promise.resolve('ZmFrZQ==')) });
 
     expect(result).toEqual({ attempted: 1, uploaded: 0, failed: 1 });
     // Local URI preserved (entry still usable offline, US-13 AC1/AC3) so a later retry can pick it up.
@@ -94,7 +94,7 @@ describe('uploadPendingPhotos (T41 / US-13)', () => {
       },
     ]);
 
-    const result = await uploadPendingPhotos({ fetchBlob: jest.fn(() => Promise.resolve({} as Blob)) });
+    const result = await uploadPendingPhotos({ readAsBase64: jest.fn(() => Promise.resolve('ZmFrZQ==')) });
 
     expect(result).toEqual({ attempted: 1, uploaded: 1, failed: 0 });
     expect(dbMock.__getStore()[0].photoUris).toEqual([

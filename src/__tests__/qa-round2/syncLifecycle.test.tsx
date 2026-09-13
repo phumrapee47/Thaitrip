@@ -22,6 +22,17 @@ import { SyncProvider, useSync } from '../../sync/SyncContext';
 jest.mock('../../storage/db');
 jest.mock('../../lib/supabaseClient');
 
+// Bug fix (HEIC/400 upload): photoUpload.ts now reads local photo URIs via
+// expo-file-system's readAsStringAsync (base64) + base64-arraybuffer's decode,
+// instead of fetch(uri).blob(). This suite exercises SyncContext's real,
+// un-injected uploadPendingPhotos() call, so the default expo-file-system
+// binding needs a working mock here (its auto-mock resolves to `undefined`,
+// which `decode()` can't handle) — content doesn't matter, only that it
+// resolves to a valid base64 string so the upload path completes.
+jest.mock('expo-file-system/legacy', () => ({
+  readAsStringAsync: jest.fn(() => Promise.resolve('ZmFrZS1waG90by1ieXRlcw==')),
+}));
+
 const dbMock = require('../../storage/db');
 const clientMock = require('../../lib/supabaseClient');
 

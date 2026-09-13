@@ -23,6 +23,17 @@ import { CheckinProvider } from '../../storage/CheckinContext';
 jest.mock('../../storage/db');
 const dbMock = require('../../storage/db');
 
+// T87 / US-25: fetchAttractionsForProvince now throws on a real fetch
+// failure instead of silently resolving to []. This suite runs against the
+// real ProvinceDetailScreen without network access, so the Wikipedia
+// enrichment call must be mocked to genuinely succeed with 0 results — this
+// is what "chaiyaphum has zero curated landmarks" is actually testing here
+// (the old empty array previously came from a swallowed fetch error, which
+// coincidentally looked the same but is no longer the correct simulation).
+jest.mock('../../services/wikipediaService');
+const wikipediaServiceMock = require('../../services/wikipediaService');
+wikipediaServiceMock.fetchAttractionsForProvince.mockResolvedValue([]);
+
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 function TestApp({ provinceId }: { provinceId: string }) {
@@ -45,27 +56,31 @@ describe('LandmarkMap wired through the real ProvinceDetailScreen (US-18)', () =
     dbMock.__seedCheckins([]);
   });
 
-  it('tapping a point on the map for a real curated province (krabi) toggles the SAME landmark id shown in the list below, and persists it', async () => {
+  it('tapping a point on the map for a real curated province (krabi) toggles the SAME landmark id shown in the list, and persists it', async () => {
     await render(<TestApp provinceId="krabi" />);
     await waitFor(() => expect(screen.getByText('เช็คอินแล้ว 0/3 แห่ง')).toBeTruthy());
 
+    // Advanced UI/UX upgrade: the map no longer renders by default (it would
+    // crowd the photo cards in the first fold) — switch to map mode first via
+    // the card/map toggle. Wait for the switch to actually commit (checked via
+    // the toggle's own state, not a label shared with other elements) before
+    // firing the next press — chaining state-changing presses back-to-back
+    // without an intervening flush point has been observed to leave a later
+    // press in this same test silently not-committed.
+    fireEvent.press(screen.getByLabelText('มุมมองแผนที่'));
+    await waitFor(() =>
+      expect(screen.getByLabelText('มุมมองแผนที่').props.accessibilityState.selected).toBe(true)
+    );
+
     // The map's point for หาดไร่เลย์ (kbi-railay-beach) — real coords from the
     // shipped dataset, not a mock.
-    const mapPoint = screen.getByLabelText('หาดไร่เลย์, ยังไม่เช็คอิน');
+    const mapPoint = screen.getByLabelText('หาดไร่เลย์, ยังไม่ได้เช็คอิน');
     fireEvent.press(mapPoint);
 
-    // Progress indicator (fed by the SAME checkins state as the map) updates.
+    // Progress indicator (fed by the SAME checkins state as the map, and
+    // visible in both view modes) updates.
     await waitFor(() => expect(screen.getByText('เช็คอินแล้ว 1/3 แห่ง')).toBeTruthy());
-
-    // Both the map point AND the list row below re-render to the checked-in
-    // label for the exact same landmark (their accessibility-label copy
-    // happens to converge to the same string once visited=true — "หาดไร่เลย์,
-    // เช็คอินแล้ว" — which is itself a useful cross-check: exactly 2 elements
-    // should now show it, one from the map, one from the list row), proving
-    // the map's onToggle used the real landmark id (kbi-railay-beach), not a
-    // mismatched/different id, and that both surfaces read the same
-    // underlying checkins state.
-    await waitFor(() => expect(screen.getAllByLabelText('หาดไร่เลย์, เช็คอินแล้ว')).toHaveLength(2));
+    await waitFor(() => expect(screen.getByLabelText('หาดไร่เลย์, เช็คอินแล้ว')).toBeTruthy());
 
     // And the underlying storage mock recorded a check-in keyed by that exact id.
     const stored = dbMock.__getCheckinStore();
@@ -73,9 +88,22 @@ describe('LandmarkMap wired through the real ProvinceDetailScreen (US-18)', () =
       expect.objectContaining({ landmarkId: 'kbi-railay-beach', provinceId: 'krabi', visited: true })
     );
 
-    // Tapping the SAME map point again toggles it back off, and the list/progress
-    // reflect that live too (not stuck / not diverging from the map).
-    fireEvent.press(screen.getAllByLabelText('หาดไร่เลย์, เช็คอินแล้ว')[0]);
+    // Switching to card mode proves the list reads the SAME underlying
+    // checkins state the map just wrote — not a mismatched/different id.
+    // Wait for the toggle's OWN (unambiguous) selected state, not the shared
+    // "..., เช็คอินแล้ว" label — that label matches both the map circle and
+    // the card's check-in button, so asserting on it here would pass even if
+    // the mode switch itself hadn't actually committed yet.
+    fireEvent.press(screen.getByLabelText('มุมมองการ์ด'));
+    await waitFor(() =>
+      expect(screen.getByLabelText('มุมมองการ์ด').props.accessibilityState.selected).toBe(true)
+    );
+    await waitFor(() => expect(screen.getByLabelText('หาดไร่เลย์, เช็คอินแล้ว')).toBeTruthy());
+
+    // And toggling it back off from the card view (a plain title press, same
+    // mechanism already covered by landmarkCheckin.test.tsx) confirms the
+    // state genuinely round-trips both ways, not just one-directionally.
+    fireEvent.press(screen.getByText('หาดไร่เลย์'));
     await waitFor(() => expect(screen.getByText('เช็คอินแล้ว 0/3 แห่ง')).toBeTruthy());
   });
 

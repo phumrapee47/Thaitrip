@@ -1,3 +1,5 @@
+import * as FileSystem from 'expo-file-system/legacy';
+import { decode } from 'base64-arraybuffer';
 import * as db from '../storage/db';
 import { getSupabaseClient } from '../lib/supabaseClient';
 
@@ -16,13 +18,21 @@ function isLocalUri(uri: string): boolean {
 }
 
 export interface PhotoUploadDeps {
-  /** Injectable so tests can avoid real `fetch`/filesystem access (T41 test note). */
-  fetchBlob?: (uri: string) => Promise<Blob>;
+  /**
+   * Injectable so tests can avoid real filesystem access (T41 test note).
+   * Returns the raw file contents base64-encoded (no `data:` prefix).
+   *
+   * Bug fix note: `fetch(uri).blob()` is unreliable for local `file://` URIs
+   * on iOS (surfaces as a 400 from Supabase Storage on upload — the blob body
+   * ends up empty/truncated) so photos are read as base64 via
+   * `expo-file-system` and decoded into an ArrayBuffer instead, which
+   * Supabase Storage accepts directly.
+   */
+  readAsBase64?: (uri: string) => Promise<string>;
 }
 
-async function defaultFetchBlob(uri: string): Promise<Blob> {
-  const response = await fetch(uri);
-  return response.blob();
+async function defaultReadAsBase64(uri: string): Promise<string> {
+  return FileSystem.readAsStringAsync(uri, { encoding: 'base64' });
 }
 
 /**
@@ -39,7 +49,7 @@ export async function uploadPendingPhotos(deps: PhotoUploadDeps = {}): Promise<P
   const client = getSupabaseClient();
   if (!client) return EMPTY_RESULT;
 
-  const fetchBlob = deps.fetchBlob ?? defaultFetchBlob;
+  const readAsBase64 = deps.readAsBase64 ?? defaultReadAsBase64;
   const entries = await db.getEntriesWithLocalPhotos();
   const result: PhotoUploadResult = { attempted: 0, uploaded: 0, failed: 0 };
 
@@ -52,10 +62,13 @@ export async function uploadPendingPhotos(deps: PhotoUploadDeps = {}): Promise<P
       if (!isLocalUri(uri)) continue;
       result.attempted += 1;
       try {
-        const blob = await fetchBlob(uri);
+        const base64 = await readAsBase64(uri);
+        const arrayBuffer = decode(base64);
         const filename = uri.split('/').pop() ?? `photo-${i}.jpg`;
         const path = `${entry.id}/${i}-${filename}`;
-        const { error: uploadError } = await client.storage.from(BUCKET).upload(path, blob, { upsert: true });
+        const { error: uploadError } = await client.storage
+          .from(BUCKET)
+          .upload(path, arrayBuffer, { upsert: true, contentType: 'image/jpeg' });
         if (uploadError) throw uploadError;
         const { data: publicUrlData } = client.storage.from(BUCKET).getPublicUrl(path);
         if (!publicUrlData?.publicUrl) throw new Error('no public url returned');

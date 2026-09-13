@@ -436,3 +436,65 @@
 
 - ประเด็น C: Requirement (US-19 AC3) ระบุเพียงว่า "ผู้ใช้ยังแก้ไขค่าที่ prefill มาได้ก่อนบันทึกจริง" แต่ไม่ได้พูดถึงกลไกยกเลิก/ล้าง metadata พิกัด (`placeLat`/`placeLng`) ที่แนบไปแล้วหลังเลือกผลลัพธ์ เอกสารนี้เพิ่ม Search Result Confirmation Chip พร้อมปุ่ม "×" เพื่อให้ผู้ใช้ล้าง metadata ได้โดยไม่ต้องแก้ข้อความ title (เช่น กรณีเลือกผลลัพธ์ผิดแล้วอยากพิมพ์ title เองล้วนๆ โดยไม่มีพิกัดแนบ) เป็นส่วนเสริม UX เล็กน้อยที่ไม่ขัดกับ AC ใดๆ (ไม่ได้เปลี่ยนพฤติกรรม prefill/ไม่สร้าง Landmark/ไม่ auto check-in ตามเดิมทุกประการ) จึงถือเป็นดุลยพินิจ UIUX ในกรอบเดิม ไม่ต้องรอ PM ตัดสินใจ แต่ระบุไว้ให้ทราบเผื่อ PM เห็นว่าเป็น scope เกินความจำเป็นและต้องการตัด chip/ปุ่ม "×" ออกเพื่อลด effort ของ T70/T71
 - ประเด็น D: ข้อความ error ของ US-20 AC3 ยกตัวอย่างไว้ว่า "เช่น 'ค้นหาไม่ได้ในขณะนี้ ลองใหม่อีกครั้ง'" เอกสารนี้ใช้ข้อความนี้ตรงตัวเป็นทั้ง offline และ generic failure โดยไม่แยกสองข้อความ เพราะการตรวจจับเน็ตเป็นแบบ opportunistic (AC216) ไม่สามารถแยกสาเหตุได้แม่นยำอยู่แล้ว ไม่ถือเป็นจุดขัดแย้งกับ requirement (ยังตรงตาม AC ทุกข้อ) เป็นเพียงข้อสังเกตทางเทคนิคส่งต่อ programmer ว่าไม่ต้องพยายามสร้าง state แยก "offline" กับ "server error" ให้ซับซ้อนเกินความจำเป็น
+
+---
+
+# ส่วนเพิ่มเติม: Advanced UI/UX Upgrade (Design System v2)
+
+หมายเหตุขอบเขต: รอบนี้ยกระดับ **visual/interaction layer** จากระดับ Prototype ไปสู่ระดับ Advance ตามมาตรฐาน `.claude/skills/advanced-mobile-uiux/SKILL.md` (8pt grid, Bento Grid, Modern Elevation, Shimmer Skeleton, Haptic Feedback, Thumb-zone, Accessibility) — ไม่เพิ่ม user flow ใหม่ ไม่เปลี่ยน business logic ใดๆ ครอบคลุมเฉพาะ component ที่มีอยู่แล้ว: **Landmark List / Landmark Card / Global Search Bar** (ProvinceDetailScreen, HomeScreen) เท่านั้น ส่วนโค้ดจริงได้ implement คู่ขนานไปแล้วในรอบนี้ (ไม่ใช่แค่เอกสารเสนอแนวทาง): `src/theme.ts`, `src/components/LandmarkCard.tsx`, `src/components/LandmarkList.tsx`, `src/components/GlobalSearchBar.tsx`, และ shared component ใหม่ `src/components/PressableScale.tsx` / `src/components/ShimmerBlock.tsx` — เพิ่ม dependency `expo-haptics` และ `expo-linear-gradient` (ติดตั้งด้วย `npx expo install` ให้ตรง SDK 57 แล้ว)
+
+## Design Tokens v2 (`src/theme.ts`)
+- `SPACING` (8pt grid): xxs4/xs8/sm12/md16/lg20/xl24/xxl32 — แทนที่ตัวเลข spacing ที่ hardcode กระจายอยู่ในแต่ละไฟล์
+- `RADIUS`: sm8/md12/lg18/xl26/full9999
+- `SHADOWS.sm/md/lg`: เงาสีเขียวเข้มโปร่งแสงหลายชั้น (`shadowColor: '#0F2A1D'`) แทนเงาสีดำทึบเดิม (`shadowColor: '#000', shadowOpacity: 0.05`)
+- `CATEGORY_COLORS` + `CATEGORY_COLOR_FALLBACK`: จับคู่สีตามหมวดหมู่ตรงกับ `CATEGORIES` ใน LandmarkList.tsx เป๊ะทั้ง 5 หมวด (ธรรมชาติ=Emerald, วัด=Amber, ทะเล=Ocean Azure, ประวัติศาสตร์=Violet, ช้อปปิ้ง=Rose)
+
+## Layout: Landmark List → Bento Grid
+- Landmark อันดับแรกของรายการ (หลัง filter) แสดงเป็น **Hero Card** (`LandmarkCard variant="hero"`) สูง 220pt เต็มความกว้าง รูปเต็มพื้นที่ + `expo-linear-gradient` ไล่จากโปร่งใสไปดำ 70% ทับ 55% ล่าง ชื่อสถานที่วางบนภาพเป็นตัวหนังสือขาว
+- ที่เหลือแสดงเป็น **2-column compact grid** (`variant="compact"`, width 48.5%, `flexWrap`) แทนรายการแนวตั้งเต็มความกว้างเดิม
+- Category badge บนรูปเปลี่ยนจากพื้นดำทึบ (`rgba(0,0,0,0.65)`) เป็นสีตาม `CATEGORY_COLORS[category].fg` ของหมวดนั้นๆ ให้สแกนหมวดหมู่ได้เร็วขึ้นด้วยสี ไม่ต้องอ่านข้อความอย่างเดียว
+- Category filter chip: ตอน active ใช้สีของหมวดหมู่นั้นแทนสี accent เขียวเดียวทุกหมวด, ปรับ `minHeight: 44` ให้ผ่านเกณฑ์ tap target ขั้นต่ำ (เดิม paddingVertical 5 ทำให้แถวสูงจริง ~26pt ไม่ผ่านเกณฑ์)
+
+## States
+- **Loading**: แทนที่ `ActivityIndicator` เดี่ยวกลางจอด้วย `ShimmerBlock` (pulse opacity 0.4↔0.9) ที่มีขนาดจำลอง Hero+Grid จริง (220pt hero + 2 tile 180pt) กัน layout shift ตอนข้อมูลมาจริง ตรงตามกฎ SKILL.md 4.1 ("ห้ามใช้ ActivityIndicator เดี่ยวๆ สำหรับส่วนที่มี layout ชัดเจน") — ส่วน loading indicator เล็กๆ ระหว่าง background-enrich (ไม่บล็อกเนื้อหาที่โหลดแล้ว) ยังคงมีอยู่แต่เปลี่ยนจาก spinner เป็นจุด shimmer เล็กแทน
+- **Empty / Error**: ดูหัวข้อ US-21 (ส่วนเพิ่มเติมถัดไปด้านล่าง จากรอบ bug-fix ที่รันคู่ขนานกันในเซสชันเดียวกัน) ที่แยก "ยังไม่ curate" ออกจาก "ดึงข้อมูลล้มเหลว" อย่างชัดเจน ทั้งสอง state ยังคงอยู่ใน scope เดียวกับ Empty State (Landmarks — Not Curated, T45) เดิม ไม่ได้ทำ UI ใหม่แยกในรอบ visual-only นี้
+- **Success**: Landmark Card เพิ่ม state `visited` เดิมไว้ครบ (border/background เขียวอ่อน) เพียงเปลี่ยนปุ่มเช็คอินให้เป็น `PressableScale` (bounce + haptic) แทน `Pressable` เฉยๆ
+
+## Micro-interactions
+- `PressableScale` (component ใหม่ใช้ `react-native-reanimated`): กดค้าง scale 0.96 → ปล่อยเด้งกลับด้วย spring (`damping: 12, stiffness: 150`) ตรงตาม SKILL.md 3.1 เป๊ะ ใช้กับ: ปุ่มเช็คอินใน Landmark Card, category filter chip, แถวผลลัพธ์ใน Global Search Bar
+- Haptic feedback (`expo-haptics`):
+  - `ImpactFeedbackStyle.Light`: กด category chip, กดเลือกผลลัพธ์ค้นหาใน Global Search Bar
+  - `ImpactFeedbackStyle.Medium`: กดเช็คอิน/ยกเลิกเช็คอิน landmark (รวมจุดบน Landmark Map ด้วย — centralize ที่ `handleToggle` ใน `LandmarkList.tsx` จุดเดียว ครอบคลุมทั้ง card และ map แทนที่จะ implement ซ้ำสองที่)
+  - Province Master (`notificationAsync Success`) ยังไม่ implement ในรอบนี้ (อยู่นอก scope ของไฟล์ที่แตะรอบนี้ — ProvinceMasterBadge.tsx ไม่ได้แก้) ระบุไว้เป็นข้อเสนอแนะสำหรับรอบถัดไป
+
+## Thumb-zone & Accessibility
+- Category chip และแถวผลลัพธ์ค้นหา (`resultRow`) ปรับเป็น `minHeight: 44` ทั้งคู่ (ของเดิมเล็กกว่าเกณฑ์)
+- Category chip เพิ่ม `accessibilityRole="button"` + `accessibilityState={{ selected }}` + `accessibilityLabel` ระบุหมวดหมู่และสถานะเลือกอยู่หรือไม่ (ของเดิมไม่มี accessibility props เลย)
+- Landmark Card title (ทั้ง hero และ compact) ยังคง `onPress={onToggle}` ไว้เหมือน component เดิม (ไม่ใช่แค่ปุ่มด้านล่างที่กดเช็คอินได้) — สำคัญเพราะมี integration test อยู่แล้วที่ผูกกับพฤติกรรมนี้ (`landmarkCheckin.test.tsx`) ต้องคงไว้ไม่ให้ regression
+
+## ข้อเสนอแนะสำหรับรอบถัดไป (ไม่ใช่ conflict กับ requirement ใดๆ ในรอบนี้)
+- ยังไม่ได้ทำ Bento redesign ให้ HomeScreen (แผนที่ 3 มิติ) และ Stats/Settings screens — ขอบเขตรอบนี้จำกัดเฉพาะ Landmark List/Card/Search ตามที่ผู้ใช้ระบุปัญหาเรื่อง "โหลดสถานที่ท่องเที่ยว" เป็นจุดโฟกัสหลัก
+- Province Master badge ยังไม่ผูก haptic `notificationAsync(Success)` ตาม SKILL.md 3.2 ตัวอย่างสุดท้าย — เสนอให้ทำในรอบถัดไปพร้อมกับ badge animation ที่มีอยู่แล้ว (T46)
+- PhotoPicker.tsx ยังไม่ได้ตรวจ thumb-zone/shimmer ในรอบนี้ (ไม่ได้อยู่ใน critical path ของปัญหา "โหลดสถานที่ไม่ขึ้น")
+
+---
+
+# ส่วนเพิ่มเติม: Advanced UI/UX v3 (Landmark List — Card/Map Toggle + Magazine Card)
+
+หมายเหตุขอบเขต: ยกระดับต่อจาก Design System v2 ตามคำขอผู้ใช้ 3 ข้อ (redesign LandmarkList/LandmarkCard, แก้บั๊ก HEIC/photo-upload 400, แก้บั๊กรูป/สถานที่จาก Wikipedia ไม่ขึ้น) — ทำโดยตรงในโค้ดจริง (ไม่ผ่าน full pipeline เพราะขอบเขตชัดเจนจากผู้ใช้อยู่แล้ว)
+
+## Layout: Card/Map View Toggle (แทนที่การ render แผนที่ใน fold แรกเสมอ)
+- Component ใหม่: segmented toggle 2 ปุ่ม ("🖼️ การ์ด" / "🗺️ แผนที่") อยู่ใต้ heading "สถานที่แนะนำ" แทนตำแหน่งเดิมของ `LandmarkMap`
+- States: `cards` (default, reset ทุกครั้งที่เปลี่ยนจังหวัด) / `map` — mutually exclusive (แสดงอย่างใดอย่างหนึ่ง ไม่ซ้อนกัน) เพื่อไม่ให้แผนที่เบียดพื้นที่รูปภาพการ์ดตาม fold แรก
+- `LandmarkProgressIndicator` และ error banner (จากรอบ US-25) ยังคงแสดงอยู่นอก toggle เสมอ (shared ทั้งสอง mode)
+- Accessibility: แต่ละปุ่ม `accessibilityRole="button"` + `accessibilityState={{selected}}` + label ระบุมุมมองชัดเจน
+
+## LandmarkCard: Magazine/Bento Card v2
+- ภาพปก: อัตราส่วนคงที่ 16:9 ทุก variant (เดิมเป็น fixed height ไม่สม่ำเสมอ), gradient overlay บางๆ ทุกใบ (หนักขึ้นเฉพาะ hero เพื่อรองรับ title บนภาพ)
+- Category badge: pill โปร่งแสง (border-radius เต็ม, สีหมวดหมู่ opacity 0.82) แทนกล่องดำทึบเดิม
+- Fallback ภาพ: ใช้ภาพ landscape จริงจาก Wikimedia (`FALLBACK_LANDMARK_IMAGE`) แทนไอคอนเดี่ยวๆ เมื่อไม่มีรูป/โหลดไม่สำเร็จ — การ์ดไม่ดูว่าง/พังอีกต่อไป
+- ปุ่มเช็คอิน: ขยายเป็น min 44pt ตาม thumb-zone
+
+## Bug Fix ที่เกี่ยวข้อง (ดูรายละเอียดเต็มใน docs/dev-notes.md "รอบ 7")
+- Photo upload 400/HEIC: เปลี่ยนกลไกอ่านไฟล์ก่อนอัปโหลดจาก `fetch().blob()` เป็น `expo-file-system` base64 + `base64-arraybuffer` decode
+- Wikipedia image/landmark ไม่ขึ้น: ครอบคลุมโดย fallback image ด้านบน (กรณีไม่มี thumbnail) ร่วมกับกลไก error-state แยกจาก empty-state ที่ทำไปแล้วในรอบ US-25 (T87-T89)

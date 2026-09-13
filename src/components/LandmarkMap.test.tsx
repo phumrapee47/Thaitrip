@@ -16,20 +16,20 @@ const landmarksWithCoords: Landmark[] = [
 describe('LandmarkMap (T67 / US-18)', () => {
   it('renders a tappable point per landmark that has coordinates, with an accessibility label matching the list contract', async () => {
     await render(<LandmarkMap landmarks={landmarksWithCoords} checkins={{}} onToggle={jest.fn()} />);
-    expect(screen.getByLabelText('จุดเอ, ยังไม่เช็คอิน')).toBeTruthy();
-    expect(screen.getByLabelText('จุดบี, ยังไม่เช็คอิน')).toBeTruthy();
+    expect(screen.getByLabelText('จุดเอ, ยังไม่ได้เช็คอิน')).toBeTruthy();
+    expect(screen.getByLabelText('จุดบี, ยังไม่ได้เช็คอิน')).toBeTruthy();
   });
 
   it('reflects check-in state in the accessibility label (visited vs not)', async () => {
     await render(<LandmarkMap landmarks={landmarksWithCoords} checkins={{ l1: true }} onToggle={jest.fn()} />);
     expect(screen.getByLabelText('จุดเอ, เช็คอินแล้ว')).toBeTruthy();
-    expect(screen.getByLabelText('จุดบี, ยังไม่เช็คอิน')).toBeTruthy();
+    expect(screen.getByLabelText('จุดบี, ยังไม่ได้เช็คอิน')).toBeTruthy();
   });
 
   it('tapping a point calls onToggle with the same (landmarkId, provinceId) contract as LandmarkListItem (US-18 AC3)', async () => {
     const onToggle = jest.fn();
     await render(<LandmarkMap landmarks={landmarksWithCoords} checkins={{}} onToggle={onToggle} />);
-    fireEvent.press(screen.getByLabelText('จุดเอ, ยังไม่เช็คอิน'));
+    fireEvent.press(screen.getByLabelText('จุดเอ, ยังไม่ได้เช็คอิน'));
     expect(onToggle).toHaveBeenCalledWith('l1', 'p');
   });
 
@@ -38,7 +38,7 @@ describe('LandmarkMap (T67 / US-18)', () => {
     await render(<LandmarkMap landmarks={mixed} checkins={{}} onToggle={jest.fn()} />);
     expect(screen.queryByLabelText(/ไม่มีพิกัด/)).toBeNull();
     // The ones with coordinates still render fine alongside it.
-    expect(screen.getByLabelText('จุดเอ, ยังไม่เช็คอิน')).toBeTruthy();
+    expect(screen.getByLabelText('จุดเอ, ยังไม่ได้เช็คอิน')).toBeTruthy();
   });
 
   it('shows the no-points fallback message (not a blank/erroring map) when nothing has coordinates', async () => {

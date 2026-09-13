@@ -32,6 +32,9 @@ export interface Landmark {
   /** Optional (see note above) — WGS84 decimal degrees. */
   lat?: number;
   lng?: number;
+  imageUrl?: string;
+  description?: string;
+  category?: string;
 }
 
 export const LANDMARKS: Landmark[] = [

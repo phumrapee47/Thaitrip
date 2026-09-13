@@ -1,5 +1,6 @@
 import React from 'react';
 import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import { COLORS } from '../theme';
 
@@ -22,8 +23,21 @@ export default function PhotoPicker({ photoUris, onChange }: PhotoPickerProps) {
       quality: 0.8,
     });
     if (!result.canceled) {
-      const newUris = result.assets.map((a) => a.uri);
-      onChange([...photoUris, ...newUris]);
+      const convertedUris = await Promise.all(
+        result.assets.map(async (asset) => {
+          try {
+            const manipulated = await ImageManipulator.manipulateAsync(
+              asset.uri,
+              [],
+              { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
+            );
+            return manipulated.uri;
+          } catch {
+            return asset.uri;
+          }
+        })
+      );
+      onChange([...photoUris, ...convertedUris]);
     }
   }
 

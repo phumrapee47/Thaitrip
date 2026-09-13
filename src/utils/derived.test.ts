@@ -138,5 +138,40 @@ describe('derived state utilities (T5)', () => {
     it('returns the raw input if it cannot be parsed as a date', () => {
       expect(formatThaiDate('not-a-date')).toBe('not-a-date');
     });
+
+    // BUG-1 regression test: an ISO date string parses as UTC midnight. If the
+    // implementation ever used local getters (getDate/getMonth/getFullYear)
+    // instead of getUTCDate/getUTCMonth/getUTCFullYear, a negative UTC offset
+    // (e.g. America/New_York, UTC-5) would roll the local date back to the
+    // previous day, producing "14 ม.ค. 2567" instead of "15 ม.ค. 2567".
+    // We force a negative-offset TZ here so this test fails on a real runner
+    // regardless of the machine's own timezone (this repo's CI/dev machines
+    // default to UTC+7, which would NOT catch the bug).
+    describe('is immune to negative UTC offsets (regression for BUG-1)', () => {
+      const originalTz = process.env.TZ;
+
+      afterEach(() => {
+        if (originalTz === undefined) {
+          delete process.env.TZ;
+        } else {
+          process.env.TZ = originalTz;
+        }
+      });
+
+      it('formats correctly under America/New_York (UTC-5)', () => {
+        process.env.TZ = 'America/New_York';
+        expect(formatThaiDate('2024-01-15')).toBe('15 ม.ค. 2567');
+      });
+
+      it('formats correctly under Pacific/Midway (UTC-11, extreme negative offset)', () => {
+        process.env.TZ = 'Pacific/Midway';
+        expect(formatThaiDate('2024-01-01')).toBe('1 ม.ค. 2567');
+      });
+
+      it('formats the last day of a month correctly under a negative offset', () => {
+        process.env.TZ = 'America/Los_Angeles';
+        expect(formatThaiDate('2024-12-31')).toBe('31 ธ.ค. 2567');
+      });
+    });
   });
 });
