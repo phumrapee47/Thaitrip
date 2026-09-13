@@ -7,7 +7,8 @@ import { PROVINCES } from '../data/thailand-provinces';
 import { getAllEntriesSorted, getTopRegion, getUnlockedCount, TOTAL_PROVINCES } from '../utils/derived';
 import EntryListItem from '../components/EntryListItem';
 import EmptyState from '../components/EmptyState';
-import { COLORS } from '../theme';
+import ShimmerBlock from '../components/ShimmerBlock';
+import { COLORS, RADIUS, SHADOWS, SPACING } from '../theme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Stats'>;
 
@@ -32,10 +33,10 @@ export default function StatsScreen({ navigation }: Props) {
       </View>
 
       {loading ? (
-        <View style={styles.skeletonBlock}>
-          <View style={styles.skeletonLine} />
-          <View style={styles.skeletonLine} />
-          <View style={styles.skeletonLine} />
+        <View style={styles.skeletonRow}>
+          <ShimmerBlock style={styles.skeletonTile} />
+          <ShimmerBlock style={styles.skeletonTile} />
+          <ShimmerBlock style={styles.skeletonTile} />
         </View>
       ) : totalEntries === 0 ? (
         <EmptyState
@@ -48,14 +49,30 @@ export default function StatsScreen({ navigation }: Props) {
           data={timeline}
           keyExtractor={(item) => item.id}
           ListHeaderComponent={
-            <View style={styles.summaryCard}>
-              <Text style={styles.summaryLine}>
-                ปลดล็อกแล้ว {unlockedCount} / {TOTAL_PROVINCES} จังหวัด
-              </Text>
-              <Text style={styles.summaryLine}>บันทึกทั้งหมด {totalEntries} รายการ</Text>
-              {topRegion ? (
-                <Text style={styles.summaryLine}>ไปเยือน{topRegion.regionNameTh}มากที่สุด</Text>
-              ) : null}
+            <View style={styles.summarySection}>
+              <View style={styles.statGrid}>
+                <View style={styles.statTile}>
+                  <Text style={styles.statIcon}>🗺️</Text>
+                  <Text style={styles.statValue}>
+                    {unlockedCount}/{TOTAL_PROVINCES}
+                  </Text>
+                  <Text style={styles.statLabel}>จังหวัดปลดล็อก</Text>
+                </View>
+                <View style={styles.statTile}>
+                  <Text style={styles.statIcon}>📔</Text>
+                  <Text style={styles.statValue}>{totalEntries}</Text>
+                  <Text style={styles.statLabel}>บันทึกทั้งหมด</Text>
+                </View>
+                {topRegion ? (
+                  <View style={styles.statTile}>
+                    <Text style={styles.statIcon}>📍</Text>
+                    <Text style={styles.statValue} numberOfLines={1}>
+                      {topRegion.regionNameTh}
+                    </Text>
+                    <Text style={styles.statLabel}>ภาคที่ไปมากที่สุด</Text>
+                  </View>
+                ) : null}
+              </View>
               <Text style={styles.timelineHeading}>ไทม์ไลน์ทั้งหมด</Text>
             </View>
           }
@@ -86,17 +103,38 @@ const styles = StyleSheet.create({
   backButton: { fontSize: 15, color: COLORS.accent, width: 60 },
   headerSpacer: { width: 60 },
   title: { fontSize: 20, fontWeight: '700', color: COLORS.textPrimary, flex: 1, textAlign: 'center' },
-  summaryCard: {
-    marginHorizontal: 16,
-    marginBottom: 8,
-    padding: 16,
-    borderRadius: 12,
-    backgroundColor: '#F5FBF9',
-    gap: 6,
+  summarySection: {
+    marginHorizontal: SPACING.md,
+    marginBottom: SPACING.sm,
   },
-  summaryLine: { fontSize: 15, fontWeight: '600', color: COLORS.textPrimary },
-  timelineHeading: { fontSize: 14, fontWeight: '700', color: COLORS.textSecondary, marginTop: 10 },
-  listContent: { paddingBottom: 24 },
-  skeletonBlock: { paddingHorizontal: 16, gap: 10, marginTop: 8 },
-  skeletonLine: { height: 18, borderRadius: 4, backgroundColor: '#EEEEEE', width: '60%' },
+  statGrid: {
+    flexDirection: 'row',
+    gap: SPACING.xs,
+  },
+  statTile: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+    borderRadius: RADIUS.lg,
+    padding: SPACING.sm,
+    alignItems: 'center',
+    gap: SPACING.xxs,
+    ...SHADOWS.sm,
+  },
+  statIcon: { fontSize: 20 },
+  statValue: { fontSize: 16, fontWeight: '800', color: COLORS.textPrimary },
+  statLabel: { fontSize: 11, color: COLORS.textSecondary, textAlign: 'center' },
+  timelineHeading: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.textSecondary,
+    marginTop: SPACING.md,
+  },
+  listContent: { paddingBottom: SPACING.xl },
+  skeletonRow: {
+    flexDirection: 'row',
+    gap: SPACING.xs,
+    paddingHorizontal: SPACING.md,
+    marginTop: SPACING.xs,
+  },
+  skeletonTile: { flex: 1, height: 84, borderRadius: RADIUS.lg },
 });

@@ -1,9 +1,10 @@
 import React from 'react';
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image, StyleSheet, Text, View } from 'react-native';
 import type { JournalEntry } from '../types/entry';
 import { formatThaiDate } from '../utils/derived';
 import SyncStatusBadge from './SyncStatusBadge';
-import { COLORS } from '../theme';
+import PressableScale from './PressableScale';
+import { COLORS, RADIUS, SPACING } from '../theme';
 
 export interface EntryListItemProps {
   entry: JournalEntry;
@@ -18,10 +19,7 @@ export interface EntryListItemProps {
 export default function EntryListItem({ entry, provinceNameTh, showSyncStatus = true, onPress }: EntryListItemProps) {
   const firstPhoto = entry.photoUris[0];
   return (
-    <Pressable
-      style={({ pressed }) => [styles.row, pressed && styles.pressed]}
-      onPress={onPress}
-    >
+    <PressableScale haptic="light" style={styles.row} onPress={onPress}>
       {firstPhoto ? (
         <Image source={{ uri: firstPhoto }} style={styles.thumbnail} />
       ) : (
@@ -48,20 +46,19 @@ export default function EntryListItem({ entry, provinceNameTh, showSyncStatus = 
           </View>
         ) : null}
       </View>
-    </Pressable>
+    </PressableScale>
   );
 }
 
 const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    gap: 12,
+    paddingVertical: SPACING.xs,
+    paddingHorizontal: SPACING.md,
+    gap: SPACING.sm,
     alignItems: 'center',
   },
-  pressed: { opacity: 0.6 },
-  thumbnail: { width: 56, height: 56, borderRadius: 8, backgroundColor: '#EEEEEE' },
+  thumbnail: { width: 56, height: 56, borderRadius: RADIUS.md, backgroundColor: '#EEEEEE' },
   thumbnailPlaceholder: { alignItems: 'center', justifyContent: 'center' },
   thumbnailPlaceholderText: { fontSize: 20 },
   textContainer: { flex: 1, gap: 2 },

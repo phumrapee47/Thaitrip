@@ -498,3 +498,33 @@
 ## Bug Fix ที่เกี่ยวข้อง (ดูรายละเอียดเต็มใน docs/dev-notes.md "รอบ 7")
 - Photo upload 400/HEIC: เปลี่ยนกลไกอ่านไฟล์ก่อนอัปโหลดจาก `fetch().blob()` เป็น `expo-file-system` base64 + `base64-arraybuffer` decode
 - Wikipedia image/landmark ไม่ขึ้น: ครอบคลุมโดย fallback image ด้านบน (กรณีไม่มี thumbnail) ร่วมกับกลไก error-state แยกจาก empty-state ที่ทำไปแล้วในรอบ US-25 (T87-T89)
+
+---
+
+# ส่วนเพิ่มเติม: Advanced UI/UX v4 (HomeScreen / StatsScreen / SettingsScreen)
+
+หมายเหตุขอบเขต: ยกระดับ 3 หน้าจอที่เหลือให้อยู่ในระดับ Advance เดียวกับ Landmark List (v2/v3) ตาม `.claude/skills/advanced-mobile-uiux/SKILL.md` — ไม่แตะโครงสร้าง 3D map/geometry ใน `Map3D.tsx`/`ProvinceTile3D.tsx` (ความเสี่ยงสูง, นอกขอบเขตที่ผู้ใช้ขอ) เน้นที่ chrome รอบข้าง + หน้าจอ Stats/Settings ทั้งหน้า
+
+## HomeScreen
+- Top bar: ปุ่ม "สถิติ" และไอคอนตั้งค่าเปลี่ยนเป็น `PressableScale` (bounce + haptic light), ปุ่มตั้งค่าขยาย hit target เป็น 44×44pt
+- `HeaderProgress`: ยกเป็น elevated Bento card (พื้นขาว, `SHADOWS.sm`, `RADIUS.lg`) ลอยเหนือพื้นหลัง แทนข้อความ+บาร์ลอยเปล่าเดิม, progress bar หนาขึ้น (5pt → 8pt) และ pill-rounded, loading state ใช้ `ShimmerBlock` แทนกล่องเทาแบน
+- `Legend`: แต่ละรายการเปลี่ยนเป็น pill chip พื้นขาวมีเงาบางๆ แทนข้อความลอยเปล่า อ่านง่ายขึ้นเมื่อแยกจากพื้นหลัง
+
+## StatsScreen
+- Summary section เปลี่ยนจาก 1 การ์ดข้อความ 3 บรรทัด เป็น **Bento stat-tile grid** (3 การ์ดแนวนอน แต่ละใบมีไอคอน + ตัวเลขใหญ่ + label): จังหวัดปลดล็อก / บันทึกทั้งหมด / ภาคที่ไปมากที่สุด — ไม่แสดง tile ที่ 3 ถ้ายังไม่มี topRegion (พฤติกรรมเดิมคงไว้)
+- Loading state: `ShimmerBlock` 3 tile แทนเส้นเทาแบน
+- **Breaking text-format change**: ข้อความ "ปลดล็อกแล้ว X / 76 จังหวัด" / "บันทึกทั้งหมด N รายการ" / "ไปเยือน\<ภาค\>มากที่สุด" (1 sentence/1 Text node) แยกเป็นค่า+label คนละ Text node แล้ว (เช่น "2/76" + "จังหวัดปลดล็อก") — test ที่เคย `getByText('บันทึกทั้งหมด 3 รายการ')` ถูกอัปเดตให้ query แยกสองส่วนแล้ว (ดู `statsScreen.test.tsx`, `migrationNonBlocking.test.tsx`)
+
+## SettingsScreen
+- ครอบ account-status section (data-loss banner / linked-email text / sync summary) ด้วย elevated card เดียว (`SHADOWS.sm`, `RADIUS.lg`, พื้นขาว) แทนข้อความลอยเปล่าติดกับพื้นหลังหน้าจอ
+- ปุ่ม "ผูกกับอีเมล" เปลี่ยนเป็น `PressableScale` (bounce + haptic light), ขยายเป็น min-height 44pt
+- `DataLossWarningBanner`: ตัด margin ที่ผูกติดกับตำแหน่งเดิมออก (ให้ parent card คุมระยะห่างแทน) เพื่อให้วางในการ์ดใหม่ได้พอดี — เนื้อหา/สี/พฤติกรรม non-dismissible เดิมไม่เปลี่ยน
+- Loading skeleton: `ShimmerBlock` แทนเส้นเทาแบน
+
+## Shared component ที่ได้รับผลด้วย (ใช้ร่วมทั้ง Province Detail / Stats)
+- `EmptyState.tsx`: ปุ่ม CTA เปลี่ยนเป็น `PressableScale` + haptic, ขยาย min-height 44pt
+- `EntryListItem.tsx`: เปลี่ยนจาก `Pressable` + opacity-fade เป็น `PressableScale` (bounce + haptic light) ตามมาตรฐานเดียวกับ Landmark Card
+
+## ข้อควรระวังสำหรับรอบถัดไป
+- `Map3D.tsx`/`ProvinceTile3D.tsx` ยังไม่ได้แตะ (ทั้ง geometry และ interaction) — ถ้าจะทำต่อควรแยกเป็นรอบเฉพาะเพราะเป็น SVG/3D transform ที่ซับซ้อนและมี test coverage เยอะ (`map3d.test.tsx`, `map2dValidationScreen.test.tsx`)
+- `EmailLinkForm.tsx` ยังไม่ได้ตรวจ/ยกระดับในรอบนี้

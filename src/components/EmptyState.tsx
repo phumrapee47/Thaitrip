@@ -1,6 +1,7 @@
 import React from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { COLORS } from '../theme';
+import { StyleSheet, Text, View } from 'react-native';
+import PressableScale from './PressableScale';
+import { COLORS, RADIUS, SPACING } from '../theme';
 
 export interface EmptyStateProps {
   message: string;
@@ -14,22 +15,24 @@ export default function EmptyState({ message, actionLabel, onAction }: EmptyStat
     <View style={styles.container}>
       <Text style={styles.message}>{message}</Text>
       {actionLabel && onAction ? (
-        <Pressable style={styles.button} onPress={onAction}>
+        <PressableScale haptic="light" style={styles.button} onPress={onAction} accessibilityRole="button">
           <Text style={styles.buttonText}>{actionLabel}</Text>
-        </Pressable>
+        </PressableScale>
       ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { alignItems: 'center', justifyContent: 'center', padding: 32, gap: 16 },
+  container: { alignItems: 'center', justifyContent: 'center', padding: SPACING.xxl, gap: SPACING.md },
   message: { fontSize: 15, color: COLORS.textSecondary, textAlign: 'center' },
   button: {
     backgroundColor: COLORS.accent,
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-    borderRadius: 8,
+    paddingVertical: SPACING.sm,
+    paddingHorizontal: SPACING.xl,
+    borderRadius: RADIUS.md,
+    minHeight: 44,
+    justifyContent: 'center',
   },
   buttonText: { color: '#FFFFFF', fontWeight: '700', fontSize: 15 },
 });

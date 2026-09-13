@@ -46,8 +46,13 @@ describe('StatsScreen (US-6)', () => {
     ]);
     await render(<TestApp />);
     // 2 distinct provinces unlocked (phuket, chiang-mai), 3 total entries.
-    await waitFor(() => expect(screen.getByText('ปลดล็อกแล้ว 2 / 76 จังหวัด')).toBeTruthy());
-    expect(screen.getByText('บันทึกทั้งหมด 3 รายการ')).toBeTruthy();
+    // Advanced UI/UX redesign: the summary is now a Bento stat-tile grid
+    // (big value + small label as separate Text nodes) instead of one
+    // full-sentence Text node.
+    await waitFor(() => expect(screen.getByText('2/76')).toBeTruthy());
+    expect(screen.getByText('จังหวัดปลดล็อก')).toBeTruthy();
+    expect(screen.getByText('3')).toBeTruthy();
+    expect(screen.getByText('บันทึกทั้งหมด')).toBeTruthy();
   });
 
   it('computes and shows the top region in Thai based on province.region (US-6 AC2)', async () => {
@@ -58,7 +63,8 @@ describe('StatsScreen (US-6)', () => {
       { id: 'e3', provinceId: 'chiang-mai', date: '2026-03-01', title: 'C', notes: '', photoUris: [], tags: [] },
     ]);
     await render(<TestApp />);
-    await waitFor(() => expect(screen.getByText('ไปเยือนภาคใต้มากที่สุด')).toBeTruthy());
+    await waitFor(() => expect(screen.getByText('ภาคใต้')).toBeTruthy());
+    expect(screen.getByText('ภาคที่ไปมากที่สุด')).toBeTruthy();
   });
 
   it('shows a cross-province timeline sorted latest-first, each item identifying its province (US-6 AC3)', async () => {

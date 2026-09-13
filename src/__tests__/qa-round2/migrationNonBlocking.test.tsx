@@ -64,14 +64,17 @@ describe('v1 -> cloud migration on app open (US-15)', () => {
     await waitFor(() => screen.getByText('Travel Journal ไทย'));
 
     fireEvent.press(screen.getByText('สถิติ'));
-    await waitFor(() => expect(screen.getByText('บันทึกทั้งหมด 3 รายการ')).toBeTruthy());
+    // Advanced UI/UX redesign: the entry count is now a Bento stat tile
+    // (value "3" and label "บันทึกทั้งหมด" as separate Text nodes).
+    await waitFor(() => expect(screen.getByText('3')).toBeTruthy());
+    expect(screen.getByText('บันทึกทั้งหมด')).toBeTruthy();
 
     // Give the fire-and-forget migration effect (AuthContext) a moment to run,
     // then confirm the count is still exactly 3 (no loss, no duplication) and
     // every previously-legacy row is now correctly flagged as migrated/pending.
     await waitFor(() => expect(dbMock.__getStore().every((e: any) => Boolean(e.updatedAt))).toBe(true));
     expect(dbMock.__getStore()).toHaveLength(3);
-    expect(screen.getByText('บันทึกทั้งหมด 3 รายการ')).toBeTruthy();
+    expect(screen.getByText('3')).toBeTruthy();
   });
 
   it('lets the user add a brand-new entry while a legacy row is still being migrated, without blocking or corrupting existing data (US-15 AC3)', async () => {

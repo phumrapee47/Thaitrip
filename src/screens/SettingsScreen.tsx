@@ -8,7 +8,9 @@ import { useCheckins } from '../storage/CheckinContext';
 import { getSyncStatus } from '../utils/syncStatus';
 import DataLossWarningBanner from '../components/DataLossWarningBanner';
 import EmailLinkForm from '../components/EmailLinkForm';
-import { COLORS } from '../theme';
+import PressableScale from '../components/PressableScale';
+import ShimmerBlock from '../components/ShimmerBlock';
+import { COLORS, RADIUS, SHADOWS, SPACING } from '../theme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Settings'>;
 
@@ -38,7 +40,7 @@ export default function SettingsScreen({ navigation }: Props) {
       <ScrollView contentContainerStyle={styles.content}>
         {loading ? (
           <View style={styles.skeletonBlock}>
-            <View style={styles.skeletonLine} />
+            <ShimmerBlock style={styles.skeletonLine} />
           </View>
         ) : showLinkForm ? (
           <EmailLinkForm
@@ -48,20 +50,27 @@ export default function SettingsScreen({ navigation }: Props) {
           />
         ) : (
           <>
-            {session?.isAnonymous ? (
-              <>
-                <DataLossWarningBanner onLinkEmailPress={() => setShowLinkForm(true)} />
-                <Pressable style={styles.linkButton} onPress={() => setShowLinkForm(true)}>
-                  <Text style={styles.linkButtonText}>ผูกกับอีเมล</Text>
-                </Pressable>
-              </>
-            ) : (
-              <Text style={styles.linkedText}>ผูกอีเมลแล้ว: {session?.email}</Text>
-            )}
+            <View style={styles.accountCard}>
+              {session?.isAnonymous ? (
+                <>
+                  <DataLossWarningBanner onLinkEmailPress={() => setShowLinkForm(true)} />
+                  <PressableScale
+                    haptic="light"
+                    style={styles.linkButton}
+                    onPress={() => setShowLinkForm(true)}
+                    accessibilityRole="button"
+                  >
+                    <Text style={styles.linkButtonText}>ผูกกับอีเมล</Text>
+                  </PressableScale>
+                </>
+              ) : (
+                <Text style={styles.linkedText}>ผูกอีเมลแล้ว: {session?.email}</Text>
+              )}
 
-            {pendingCount > 0 ? (
-              <Text style={styles.syncSummary}>มี {pendingCount} รายการรอซิงก์</Text>
-            ) : null}
+              {pendingCount > 0 ? (
+                <Text style={styles.syncSummary}>มี {pendingCount} รายการรอซิงก์</Text>
+              ) : null}
+            </View>
 
             <Text style={styles.versionText}>เวอร์ชัน {APP_VERSION}</Text>
           </>
@@ -84,19 +93,34 @@ const styles = StyleSheet.create({
   backButton: { fontSize: 15, color: COLORS.accent, width: 60 },
   headerSpacer: { width: 60 },
   title: { fontSize: 20, fontWeight: '700', color: COLORS.textPrimary, flex: 1, textAlign: 'center' },
-  content: { paddingBottom: 32 },
-  skeletonBlock: { paddingHorizontal: 16, marginTop: 8 },
-  skeletonLine: { height: 18, borderRadius: 4, backgroundColor: '#EEEEEE', width: '60%' },
+  content: { paddingBottom: SPACING.xl },
+  skeletonBlock: { paddingHorizontal: SPACING.md, marginTop: SPACING.xs },
+  skeletonLine: { height: 18, borderRadius: RADIUS.sm, width: '60%' },
+  accountCard: {
+    marginHorizontal: SPACING.md,
+    marginTop: SPACING.xs,
+    padding: SPACING.md,
+    borderRadius: RADIUS.lg,
+    backgroundColor: '#FFFFFF',
+    gap: SPACING.sm,
+    ...SHADOWS.sm,
+  },
   linkButton: {
-    marginHorizontal: 16,
-    marginTop: 16,
     backgroundColor: COLORS.accent,
-    borderRadius: 8,
-    paddingVertical: 12,
+    borderRadius: RADIUS.md,
+    paddingVertical: SPACING.sm,
+    minHeight: 44,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   linkButtonText: { color: '#FFFFFF', fontWeight: '700', fontSize: 15 },
-  linkedText: { marginHorizontal: 16, marginTop: 16, fontSize: 15, color: COLORS.textPrimary, fontWeight: '600' },
-  syncSummary: { marginHorizontal: 16, marginTop: 16, fontSize: 13, color: COLORS.textSecondary },
-  versionText: { marginHorizontal: 16, marginTop: 32, fontSize: 12, color: COLORS.textSecondary, textAlign: 'center' },
+  linkedText: { fontSize: 15, color: COLORS.textPrimary, fontWeight: '600' },
+  syncSummary: { fontSize: 13, color: COLORS.textSecondary },
+  versionText: {
+    marginHorizontal: SPACING.md,
+    marginTop: SPACING.xxl,
+    fontSize: 12,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+  },
 });

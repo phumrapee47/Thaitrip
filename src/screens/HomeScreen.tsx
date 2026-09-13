@@ -12,7 +12,8 @@ import HeaderProgress from '../components/HeaderProgress';
 import Map3D from '../components/Map3D';
 import Legend from '../components/Legend';
 import GlobalSearchBar from '../components/GlobalSearchBar';
-import { COLORS } from '../theme';
+import PressableScale from '../components/PressableScale';
+import { COLORS, RADIUS, SPACING } from '../theme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Home'>;
 
@@ -77,16 +78,25 @@ export default function HomeScreen({ navigation }: Props) {
         <View style={styles.topBar}>
           <Text style={styles.appTitle}>Travel Journal ไทย</Text>
           <View style={styles.topBarActions}>
-            <Pressable onPress={() => navigation.navigate('Stats')} hitSlop={8}>
+            <PressableScale
+              haptic="light"
+              onPress={() => navigation.navigate('Stats')}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="ดูสถิติการเดินทาง"
+            >
               <Text style={styles.statsLink}>สถิติ</Text>
-            </Pressable>
-            <Pressable
+            </PressableScale>
+            <PressableScale
+              haptic="light"
               onPress={() => navigation.navigate('Settings')}
               hitSlop={8}
+              style={styles.settingsButton}
+              accessibilityRole="button"
               accessibilityLabel="ตั้งค่า"
             >
               <Text style={styles.settingsIcon}>⚙️</Text>
-            </Pressable>
+            </PressableScale>
           </View>
         </View>
 
@@ -128,26 +138,27 @@ export default function HomeScreen({ navigation }: Props) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
-  scrollContent: { paddingBottom: 32 },
+  scrollContent: { paddingBottom: SPACING.xxl },
   topBar: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingTop: 8,
+    paddingHorizontal: SPACING.lg,
+    paddingTop: SPACING.xs,
   },
   appTitle: { fontSize: 20, fontWeight: '700', color: COLORS.textPrimary },
-  topBarActions: { flexDirection: 'row', alignItems: 'center', gap: 16 },
+  topBarActions: { flexDirection: 'row', alignItems: 'center', gap: SPACING.md },
   statsLink: { fontSize: 15, color: COLORS.accent, fontWeight: '600' },
+  settingsButton: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
   settingsIcon: { fontSize: 18 },
   hintBanner: {
-    marginHorizontal: 20,
-    marginTop: 8,
-    padding: 10,
-    borderRadius: 8,
+    marginHorizontal: SPACING.lg,
+    marginTop: SPACING.xs,
+    padding: SPACING.sm,
+    borderRadius: RADIUS.md,
     backgroundColor: '#EAF7F1',
   },
   hintText: { fontSize: 13, color: COLORS.accentDark, textAlign: 'center' },
-  devLink: { alignSelf: 'center', marginTop: 16, padding: 8 },
+  devLink: { alignSelf: 'center', marginTop: SPACING.md, padding: SPACING.xs },
   devLinkText: { fontSize: 12, color: COLORS.textSecondary },
 });

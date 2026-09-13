@@ -1,6 +1,6 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { COLORS } from '../theme';
+import { COLORS, RADIUS, SPACING } from '../theme';
 
 /** T23: static legend explaining locked vs unlocked tile colors, shown under the map. */
 export default function Legend() {
@@ -32,12 +32,23 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'center',
-    gap: 24,
-    rowGap: 8,
-    paddingVertical: 12,
+    gap: SPACING.sm,
+    rowGap: SPACING.xs,
+    paddingVertical: SPACING.sm,
+    paddingHorizontal: SPACING.md,
   },
-  item: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  swatch: { width: 14, height: 14, borderRadius: 3 },
+  item: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.xs,
+    backgroundColor: '#FFFFFF',
+    borderRadius: RADIUS.full,
+    paddingVertical: SPACING.xxs,
+    paddingHorizontal: SPACING.sm,
+    borderWidth: 1,
+    borderColor: '#EDEDED',
+  },
+  swatch: { width: 14, height: 14, borderRadius: 4 },
   unlockedSwatchGroup: { flexDirection: 'row' },
   unlockedTop: { backgroundColor: COLORS.unlockedTop, marginRight: 2 },
   unlockedSide: { backgroundColor: COLORS.unlockedSide },
@@ -49,5 +60,5 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   masterStar: { fontSize: 8 },
-  label: { fontSize: 13, color: COLORS.textSecondary },
+  label: { fontSize: 13, color: COLORS.textSecondary, fontWeight: '600' },
 });

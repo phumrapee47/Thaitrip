@@ -1,6 +1,6 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { COLORS } from '../theme';
+import { COLORS, RADIUS, SPACING } from '../theme';
 
 export interface DataLossWarningBannerProps {
   onLinkEmailPress: () => void;
@@ -29,12 +29,10 @@ export default function DataLossWarningBanner({ onLinkEmailPress }: DataLossWarn
 const styles = StyleSheet.create({
   banner: {
     flexDirection: 'row',
-    gap: 10,
+    gap: SPACING.xs,
     backgroundColor: COLORS.amberBg,
-    borderRadius: 10,
-    padding: 12,
-    marginHorizontal: 16,
-    marginTop: 12,
+    borderRadius: RADIUS.md,
+    padding: SPACING.sm,
     alignItems: 'flex-start',
   },
   icon: { fontSize: 16 },

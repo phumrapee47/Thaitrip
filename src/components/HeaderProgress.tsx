@@ -1,7 +1,8 @@
 import React, { useEffect } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
-import { COLORS } from '../theme';
+import ShimmerBlock from './ShimmerBlock';
+import { COLORS, RADIUS, SHADOWS, SPACING } from '../theme';
 import { TOTAL_PROVINCES } from '../utils/derived';
 
 export interface HeaderProgressProps {
@@ -27,17 +28,17 @@ export default function HeaderProgress({ unlockedCount, loading }: HeaderProgres
 
   if (loading) {
     return (
-      <View style={styles.container}>
-        <View style={[styles.skeletonText]} />
+      <View style={styles.card}>
+        <ShimmerBlock style={styles.skeletonText} />
         <View style={styles.track}>
-          <View style={styles.skeletonBar} />
+          <ShimmerBlock style={styles.skeletonBar} />
         </View>
       </View>
     );
   }
 
   return (
-    <View style={styles.container}>
+    <View style={styles.card}>
       <Text style={styles.label}>
         ปลดล็อกแล้ว {unlockedCount} / {TOTAL_PROVINCES} จังหวัด
       </Text>
@@ -49,29 +50,35 @@ export default function HeaderProgress({ unlockedCount, loading }: HeaderProgres
 }
 
 const styles = StyleSheet.create({
-  container: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 4 },
-  label: { fontSize: 15, fontWeight: '600', color: COLORS.textPrimary, marginBottom: 6 },
+  card: {
+    marginHorizontal: SPACING.md,
+    marginTop: SPACING.xs,
+    padding: SPACING.md,
+    borderRadius: RADIUS.lg,
+    backgroundColor: '#FFFFFF',
+    ...SHADOWS.sm,
+  },
+  label: { fontSize: 15, fontWeight: '600', color: COLORS.textPrimary, marginBottom: SPACING.xs },
   track: {
-    height: 5,
-    borderRadius: 3,
+    height: 8,
+    borderRadius: RADIUS.full,
     backgroundColor: COLORS.trackBg,
     overflow: 'hidden',
   },
   fill: {
     height: '100%',
     backgroundColor: COLORS.accent,
-    borderRadius: 3,
+    borderRadius: RADIUS.full,
   },
   skeletonText: {
     width: 160,
     height: 16,
-    borderRadius: 4,
-    backgroundColor: '#EEEEEE',
-    marginBottom: 6,
+    borderRadius: RADIUS.sm,
+    marginBottom: SPACING.xs,
   },
   skeletonBar: {
     width: '40%',
     height: '100%',
-    backgroundColor: '#EEEEEE',
+    borderRadius: RADIUS.full,
   },
 });

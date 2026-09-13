@@ -353,3 +353,25 @@ T87-T89 ทำครบตาม AC ของ US-25 ทั้ง 6 ข้อ ไ
 ### ผลการรัน
 - `npx tsc --noEmit -p .` — ผ่าน ไม่มี error
 - `npx jest` ทั้งชุด — **47/47 suites ผ่าน, 245 passed + 1 skip เดิม** รันซ้ำ 2 รอบติดกันเพื่อยืนยันความเสถียร (ไม่มี flaky เหลือจากรอบนี้)
+
+---
+
+## รอบ 8: Advanced UI/UX v4 — HomeScreen / StatsScreen / SettingsScreen redesign
+
+รายละเอียด design decision เต็มอยู่ใน `docs/design-spec.md` ส่วน "Advanced UI/UX v4" — สรุปไฟล์ที่แก้:
+
+- `src/screens/HomeScreen.tsx`, `src/components/HeaderProgress.tsx`, `src/components/Legend.tsx` — Bento card + shimmer + `PressableScale`/haptic บน top bar (ไม่แตะ `Map3D.tsx`)
+- `src/screens/StatsScreen.tsx` — summary card เดิม (1 sentence/tile) เปลี่ยนเป็น Bento stat-tile grid (ค่า+label แยก Text node) — **breaking text change** ที่กระทบ test
+- `src/screens/SettingsScreen.tsx`, `src/components/DataLossWarningBanner.tsx` — รวม account section เป็น elevated card เดียว, `PressableScale` บนปุ่มผูกอีเมล
+- `src/components/EmptyState.tsx`, `src/components/EntryListItem.tsx` — shared component อัปเกรดเป็น `PressableScale` + haptic (ใช้ร่วมทั้ง Province Detail และ Stats)
+
+### Test ที่ต้องแก้ตาม breaking text change ของ StatsScreen
+- `src/__tests__/integration/statsScreen.test.tsx` — แยก assertion `'ปลดล็อกแล้ว 2 / 76 จังหวัด'` → `'2/76'` + `'จังหวัดปลดล็อก'` (เช่นเดียวกับอีก 2 stat)
+- `src/__tests__/qa-round2/migrationNonBlocking.test.tsx` — แยก `'บันทึกทั้งหมด 3 รายการ'` → `'3'` + `'บันทึกทั้งหมด'`
+
+### หมายเหตุสำคัญ: false-positive flaky จาก system load (ไม่ใช่บั๊กจากรอบนี้)
+รันเต็มชุดแบบ parallel (`npx jest`) บนเครื่องที่มี load สูงตอนนั้น เจอ suite ทยอย fail ด้วย `Exceeded timeout of 5000 ms` (สูงสุดเจอ 12 suites fail ในรอบเดียว, ตัวเลขไม่คงที่ระหว่างรอบ) — ตรวจสอบแล้วว่า **ไม่ใช่ regression จริง**: รันไฟล์เดียวกันแยกเดี่ยวผ่าน 100% ทุกครั้ง และรัน `npx jest --runInBand` (serial, ไม่มี worker แย่ง CPU กัน) ผ่านครบ **47/47 suites** เวลารวมแค่ ~70 วินาที — สรุปว่าเป็น timeout จาก resource contention ของเครื่องตอนรัน parallel เท่านั้น ถ้าเจอเคสแบบนี้อีกในอนาคต ให้ลอง `--runInBand` ก่อนสรุปว่าเป็นบั๊กจริง
+
+### ผลการรัน (ยืนยันสุดท้ายด้วย `--runInBand`)
+- `npx tsc --noEmit -p .` — ผ่าน
+- `npx jest --runInBand` — **47/47 suites ผ่าน, 245 passed + 1 skip เดิม**
