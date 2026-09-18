@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Pressable, SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
 import { useAuth } from '../auth/AuthContext';
@@ -30,9 +30,16 @@ export default function SettingsScreen({ navigation }: Props) {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <Pressable onPress={() => navigation.goBack()} hitSlop={8}>
+        <PressableScale
+          haptic="light"
+          style={styles.backButtonWrap}
+          onPress={() => navigation.goBack()}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="กลับ"
+        >
           <Text style={styles.backButton}>‹ กลับ</Text>
-        </Pressable>
+        </PressableScale>
         <Text style={styles.title}>ตั้งค่า</Text>
         <View style={styles.headerSpacer} />
       </View>
@@ -86,11 +93,22 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 12,
+    paddingHorizontal: SPACING.md,
+    paddingTop: SPACING.xs,
+    paddingBottom: SPACING.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
   },
-  backButton: { fontSize: 15, color: COLORS.accent, width: 60 },
+  backButtonWrap: {
+    minWidth: 44,
+    height: 40,
+    paddingHorizontal: SPACING.sm,
+    borderRadius: RADIUS.full,
+    backgroundColor: COLORS.trackBg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  backButton: { fontSize: 15, color: COLORS.accent, fontWeight: '700' },
   headerSpacer: { width: 60 },
   title: { fontSize: 20, fontWeight: '700', color: COLORS.textPrimary, flex: 1, textAlign: 'center' },
   content: { paddingBottom: SPACING.xl },
@@ -101,7 +119,7 @@ const styles = StyleSheet.create({
     marginTop: SPACING.xs,
     padding: SPACING.md,
     borderRadius: RADIUS.lg,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: COLORS.surface,
     gap: SPACING.sm,
     ...SHADOWS.sm,
   },
@@ -113,7 +131,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  linkButtonText: { color: '#FFFFFF', fontWeight: '700', fontSize: 15 },
+  linkButtonText: { color: COLORS.textOnDark, fontWeight: '700', fontSize: 15 },
   linkedText: { fontSize: 15, color: COLORS.textPrimary, fontWeight: '600' },
   syncSummary: { fontSize: 13, color: COLORS.textSecondary },
   versionText: {

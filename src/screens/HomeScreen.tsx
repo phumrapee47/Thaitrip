@@ -74,7 +74,7 @@ export default function HomeScreen({ navigation }: Props) {
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+      <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
         <View style={styles.topBar}>
           <Text style={styles.appTitle}>Travel Journal ไทย</Text>
           <View style={styles.topBarActions}>
@@ -92,6 +92,9 @@ export default function HomeScreen({ navigation }: Props) {
               onPress={() => navigation.navigate('Settings')}
               hitSlop={8}
               style={styles.settingsButton}
+              // T127 / US-36 AC1,3,4: wrapped in a round surface so it reads as a
+              // clear tap target instead of a bare floating icon — same 44x44pt
+              // hit area and PressableScale scale=0.96 press feedback as before.
               accessibilityRole="button"
               accessibilityLabel="ตั้งค่า"
             >
@@ -136,6 +139,12 @@ export default function HomeScreen({ navigation }: Props) {
   );
 }
 
+// T127 / US-36 AC1,3,4 (docs/design-spec.md "Layout Redesign Spec: HomeScreen"):
+// every main section (topBar -> search card -> header progress card -> map
+// hero card -> legend) now uses this single SPACING.lg gap via its own
+// marginBottom, instead of the old mix of xs/sm margins — so scrolling reads
+// as clearly-separated bento sections. Information architecture/order is
+// unchanged; only spacing/elevation/surface/color moved.
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
   scrollContent: { paddingBottom: SPACING.xxl },
@@ -144,19 +153,27 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: SPACING.lg,
-    paddingTop: SPACING.xs,
+    paddingTop: SPACING.sm,
+    marginBottom: SPACING.lg,
   },
   appTitle: { fontSize: 20, fontWeight: '700', color: COLORS.textPrimary },
   topBarActions: { flexDirection: 'row', alignItems: 'center', gap: SPACING.md },
-  statsLink: { fontSize: 15, color: COLORS.accent, fontWeight: '600' },
-  settingsButton: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
+  statsLink: { fontSize: 15, color: COLORS.accentDark, fontWeight: '600' },
+  settingsButton: {
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: RADIUS.full,
+    backgroundColor: COLORS.trackBg,
+  },
   settingsIcon: { fontSize: 18 },
   hintBanner: {
     marginHorizontal: SPACING.lg,
-    marginTop: SPACING.xs,
+    marginBottom: SPACING.lg,
     padding: SPACING.sm,
     borderRadius: RADIUS.md,
-    backgroundColor: '#EAF7F1',
+    backgroundColor: COLORS.accentSurface,
   },
   hintText: { fontSize: 13, color: COLORS.accentDark, textAlign: 'center' },
   devLink: { alignSelf: 'center', marginTop: SPACING.md, padding: SPACING.xs },

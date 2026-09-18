@@ -4,7 +4,6 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
-  Pressable,
   SafeAreaView,
   ScrollView,
   StyleSheet,
@@ -13,6 +12,7 @@ import {
   View,
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import * as Haptics from 'expo-haptics';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
 import { useJournal } from '../storage/JournalContext';
@@ -24,9 +24,10 @@ import PhotoPicker from '../components/PhotoPicker';
 import TagSelector from '../components/TagSelector';
 import SearchPlaceField from '../components/SearchPlaceField';
 import SearchResultConfirmationChip from '../components/SearchResultConfirmationChip';
+import PressableScale from '../components/PressableScale';
 import { useNominatimSearch } from '../hooks/useNominatimSearch';
 import type { NominatimResult } from '../lib/nominatimClient';
-import { COLORS } from '../theme';
+import { COLORS, RADIUS, SHADOWS, SPACING } from '../theme';
 
 interface SelectedPlace {
   lat: number;
@@ -69,6 +70,8 @@ export default function AddEntryScreen({ route, navigation }: Props) {
   const [titleError, setTitleError] = useState<string | null>(null);
   const [dateError, setDateError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [titleFocused, setTitleFocused] = useState(false);
+  const [notesFocused, setNotesFocused] = useState(false);
 
   useEffect(() => {
     // If entry data arrives after mount (context loads async), sync fields once.
@@ -146,6 +149,7 @@ export default function AddEntryScreen({ route, navigation }: Props) {
         // T48 / US-10 AC3: auto check-in the selected landmark, no extra user action needed.
         await setCheckedIn(selectedLandmarkId, provinceId, true);
       }
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       navigation.goBack();
     } catch (err) {
       Alert.alert('บันทึกไม่สำเร็จ', 'เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง');
@@ -176,9 +180,16 @@ export default function AddEntryScreen({ route, navigation }: Props) {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <View style={styles.header}>
-          <Pressable onPress={() => navigation.goBack()} hitSlop={8}>
-            <Text style={styles.backButton}>‹ ยกเลิก</Text>
-          </Pressable>
+          <PressableScale
+            haptic="light"
+            style={styles.backButton}
+            onPress={() => navigation.goBack()}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="ยกเลิก"
+          >
+            <Text style={styles.backButtonText}>‹ ยกเลิก</Text>
+          </PressableScale>
           <Text style={styles.headerTitle}>
             {isEditMode ? 'แก้ไขบันทึก' : `จังหวัด ${province?.nameTh ?? ''}`}
           </Text>
@@ -186,110 +197,131 @@ export default function AddEntryScreen({ route, navigation }: Props) {
         </View>
 
         <ScrollView contentContainerStyle={styles.form}>
-          <Text style={styles.fieldLabel}>วันที่ *</Text>
-          <Pressable style={styles.dateInput} onPress={() => setShowDatePicker(true)}>
-            <Text style={styles.dateInputText}>{formatThaiDate(date)}</Text>
-          </Pressable>
-          {dateError ? <Text style={styles.errorText}>{dateError}</Text> : null}
-          {showDatePicker ? (
-            <DateTimePicker
-              value={new Date(date)}
-              mode="date"
-              display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-              onChange={(_event, selectedDate) => {
-                setShowDatePicker(Platform.OS === 'ios');
-                if (selectedDate) {
-                  setDate(selectedDate.toISOString().slice(0, 10));
-                }
-              }}
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>ข้อมูลหลัก</Text>
+
+            <Text style={styles.fieldLabel}>วันที่ *</Text>
+            <PressableScale
+              haptic="light"
+              style={styles.dateInput}
+              onPress={() => setShowDatePicker(true)}
+              accessibilityRole="button"
+            >
+              <Text style={styles.dateInputText}>{formatThaiDate(date)}</Text>
+            </PressableScale>
+            {dateError ? <Text style={styles.errorText}>{dateError}</Text> : null}
+            {showDatePicker ? (
+              <DateTimePicker
+                value={new Date(date)}
+                mode="date"
+                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                onChange={(_event, selectedDate) => {
+                  setShowDatePicker(Platform.OS === 'ios');
+                  if (selectedDate) {
+                    setDate(selectedDate.toISOString().slice(0, 10));
+                  }
+                }}
+              />
+            ) : null}
+
+            <Text style={styles.fieldLabel}>ชื่อสถานที่ *</Text>
+            <TextInput
+              style={[styles.textInput, titleFocused && styles.textInputFocused]}
+              placeholder="ชื่อสถานที่"
+              value={title}
+              onChangeText={setTitle}
+              onFocus={() => setTitleFocused(true)}
+              onBlur={() => setTitleFocused(false)}
             />
-          ) : null}
+            {titleError ? <Text style={styles.errorText}>{titleError}</Text> : null}
 
-          <Text style={styles.fieldLabel}>ชื่อสถานที่ *</Text>
-          <TextInput
-            style={styles.textInput}
-            placeholder="ชื่อสถานที่"
-            value={title}
-            onChangeText={setTitle}
-          />
-          {titleError ? <Text style={styles.errorText}>{titleError}</Text> : null}
+            {/* T70/T71 / US-19, US-20: optional, fully independent from title's own
+                validation/error above — search failures never block save (T74). */}
+            {selectedPlace ? (
+              <SearchResultConfirmationChip label={selectedPlace.label} onClear={handleClearSelectedPlace} />
+            ) : (
+              <SearchPlaceField
+                query={placeSearch.query}
+                status={placeSearch.status}
+                results={placeSearch.results}
+                onChangeQuery={placeSearch.onChangeQuery}
+                onSelectResult={handleSelectPlaceResult}
+                onRetry={placeSearch.retry}
+              />
+            )}
+          </View>
 
-          {/* T70/T71 / US-19, US-20: optional, fully independent from title's own
-              validation/error above — search failures never block save (T74). */}
-          {selectedPlace ? (
-            <SearchResultConfirmationChip label={selectedPlace.label} onClear={handleClearSelectedPlace} />
-          ) : (
-            <SearchPlaceField
-              query={placeSearch.query}
-              status={placeSearch.status}
-              results={placeSearch.results}
-              onChangeQuery={placeSearch.onChangeQuery}
-              onSelectResult={handleSelectPlaceResult}
-              onRetry={placeSearch.retry}
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>รายละเอียดเพิ่มเติม</Text>
+
+            <Text style={styles.fieldLabel}>บันทึกความทรงจำ</Text>
+            <TextInput
+              style={[styles.textInput, styles.multilineInput, notesFocused && styles.textInputFocused]}
+              placeholder="บันทึกความทรงจำ..."
+              value={notes}
+              onChangeText={setNotes}
+              onFocus={() => setNotesFocused(true)}
+              onBlur={() => setNotesFocused(false)}
+              multiline
             />
-          )}
 
-          <Text style={styles.fieldLabel}>บันทึกความทรงจำ</Text>
-          <TextInput
-            style={[styles.textInput, styles.multilineInput]}
-            placeholder="บันทึกความทรงจำ..."
-            value={notes}
-            onChangeText={setNotes}
-            multiline
-          />
+            <Text style={styles.fieldLabel}>รูปภาพ</Text>
+            <PhotoPicker photoUris={photoUris} onChange={setPhotoUris} />
 
-          <Text style={styles.fieldLabel}>รูปภาพ</Text>
-          <PhotoPicker photoUris={photoUris} onChange={setPhotoUris} />
+            <Text style={styles.fieldLabel}>แท็ก</Text>
+            <TagSelector selectedTags={tags} onChange={setTags} />
 
-          <Text style={styles.fieldLabel}>แท็ก</Text>
-          <TagSelector selectedTags={tags} onChange={setTags} />
+            {landmarks.length > 0 ? (
+              <>
+                <Text style={styles.fieldLabel}>เช็คอินสถานที่ (ถ้ามี)</Text>
+                <View style={styles.landmarkChipRow}>
+                  <PressableScale
+                    haptic="light"
+                    style={[styles.landmarkChip, !selectedLandmarkId && styles.landmarkChipSelected]}
+                    onPress={() => setSelectedLandmarkId(null)}
+                  >
+                    <Text style={[styles.landmarkChipText, !selectedLandmarkId && styles.landmarkChipTextSelected]}>
+                      ไม่ระบุ
+                    </Text>
+                  </PressableScale>
+                  {landmarks.map((landmark) => {
+                    const selected = selectedLandmarkId === landmark.id;
+                    return (
+                      <PressableScale
+                        key={landmark.id}
+                        haptic="light"
+                        style={[styles.landmarkChip, selected && styles.landmarkChipSelected]}
+                        onPress={() => setSelectedLandmarkId(landmark.id)}
+                      >
+                        <Text style={[styles.landmarkChipText, selected && styles.landmarkChipTextSelected]}>
+                          {landmark.nameTh}
+                        </Text>
+                      </PressableScale>
+                    );
+                  })}
+                </View>
+              </>
+            ) : null}
+          </View>
 
-          {landmarks.length > 0 ? (
-            <>
-              <Text style={styles.fieldLabel}>เช็คอินสถานที่ (ถ้ามี)</Text>
-              <View style={styles.landmarkChipRow}>
-                <Pressable
-                  style={[styles.landmarkChip, !selectedLandmarkId && styles.landmarkChipSelected]}
-                  onPress={() => setSelectedLandmarkId(null)}
-                >
-                  <Text style={[styles.landmarkChipText, !selectedLandmarkId && styles.landmarkChipTextSelected]}>
-                    ไม่ระบุ
-                  </Text>
-                </Pressable>
-                {landmarks.map((landmark) => {
-                  const selected = selectedLandmarkId === landmark.id;
-                  return (
-                    <Pressable
-                      key={landmark.id}
-                      style={[styles.landmarkChip, selected && styles.landmarkChipSelected]}
-                      onPress={() => setSelectedLandmarkId(landmark.id)}
-                    >
-                      <Text style={[styles.landmarkChipText, selected && styles.landmarkChipTextSelected]}>
-                        {landmark.nameTh}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            </>
-          ) : null}
-
-          <Pressable
+          <PressableScale
+            haptic="medium"
             style={[styles.saveButton, saving && styles.saveButtonDisabled]}
             onPress={handleSave}
             disabled={saving}
+            accessibilityRole="button"
           >
             {saving ? (
-              <ActivityIndicator color="#FFFFFF" />
+              <ActivityIndicator color={COLORS.textOnDark} />
             ) : (
               <Text style={styles.saveButtonText}>{isEditMode ? 'บันทึกการแก้ไข' : 'บันทึก'}</Text>
             )}
-          </Pressable>
+          </PressableScale>
 
           {isEditMode ? (
-            <Pressable style={styles.deleteButton} onPress={handleDelete}>
+            <PressableScale haptic="light" style={styles.deleteButton} onPress={handleDelete} accessibilityRole="button">
               <Text style={styles.deleteButtonText}>ลบบันทึกนี้</Text>
-            </Pressable>
+            </PressableScale>
           ) : null}
         </ScrollView>
       </KeyboardAvoidingView>
@@ -303,53 +335,80 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 12,
+    paddingHorizontal: SPACING.md,
+    paddingTop: SPACING.xs,
+    paddingBottom: SPACING.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
   },
-  backButton: { fontSize: 15, color: COLORS.accent, width: 70 },
+  backButton: {
+    minWidth: 44,
+    height: 40,
+    paddingHorizontal: SPACING.sm,
+    borderRadius: RADIUS.full,
+    backgroundColor: COLORS.trackBg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  backButtonText: { fontSize: 15, color: COLORS.accent, fontWeight: '700' },
   headerSpacer: { width: 70 },
   headerTitle: { fontSize: 17, fontWeight: '700', color: COLORS.textPrimary, flex: 1, textAlign: 'center' },
-  form: { paddingHorizontal: 16, paddingBottom: 48, gap: 4 },
-  fieldLabel: { fontSize: 13, fontWeight: '600', color: COLORS.textPrimary, marginTop: 16, marginBottom: 6 },
+  form: { paddingHorizontal: SPACING.md, paddingBottom: SPACING.xxl, gap: SPACING.lg },
+  card: {
+    backgroundColor: COLORS.surface,
+    borderRadius: RADIUS.lg,
+    padding: SPACING.md,
+    gap: 4,
+    borderWidth: 1,
+    borderColor: COLORS.borderLight,
+    ...SHADOWS.sm,
+  },
+  cardTitle: { fontSize: 14, fontWeight: '700', color: COLORS.accentDark, marginBottom: SPACING.xxs },
+  fieldLabel: { fontSize: 13, fontWeight: '600', color: COLORS.textPrimary, marginTop: SPACING.md, marginBottom: 6 },
   textInput: {
     borderWidth: 1,
-    borderColor: '#D9D9D9',
-    borderRadius: 8,
-    paddingHorizontal: 12,
+    borderColor: COLORS.border,
+    borderRadius: RADIUS.md,
+    paddingHorizontal: SPACING.sm,
     paddingVertical: 10,
     fontSize: 15,
+  },
+  textInputFocused: {
+    borderColor: COLORS.accent,
+    ...SHADOWS.sm,
   },
   multilineInput: { minHeight: 90, textAlignVertical: 'top' },
   dateInput: {
     borderWidth: 1,
-    borderColor: '#D9D9D9',
-    borderRadius: 8,
-    paddingHorizontal: 12,
+    borderColor: COLORS.border,
+    borderRadius: RADIUS.md,
+    paddingHorizontal: SPACING.sm,
     paddingVertical: 10,
   },
   dateInputText: { fontSize: 15, color: COLORS.textPrimary },
   errorText: { fontSize: 12, color: COLORS.danger, marginTop: 4 },
   saveButton: {
-    marginTop: 28,
     backgroundColor: COLORS.accent,
-    borderRadius: 8,
+    borderRadius: RADIUS.lg,
     paddingVertical: 14,
     alignItems: 'center',
+    ...SHADOWS.md,
   },
   saveButtonDisabled: { opacity: 0.6 },
-  saveButtonText: { color: '#FFFFFF', fontWeight: '700', fontSize: 16 },
-  deleteButton: { marginTop: 16, alignItems: 'center', paddingVertical: 10 },
+  saveButtonText: { color: COLORS.textOnDark, fontWeight: '700', fontSize: 16 },
+  deleteButton: { alignItems: 'center', paddingVertical: 10 },
   deleteButtonText: { color: COLORS.danger, fontWeight: '600', fontSize: 14 },
-  landmarkChipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  landmarkChipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.xs },
   landmarkChip: {
     borderWidth: 1,
-    borderColor: '#D9D9D9',
-    borderRadius: 16,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    borderColor: COLORS.border,
+    borderRadius: RADIUS.full,
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: SPACING.xxs + 2,
+    minHeight: 32,
+    justifyContent: 'center',
   },
   landmarkChipSelected: { backgroundColor: COLORS.accent, borderColor: COLORS.accent },
   landmarkChipText: { fontSize: 13, color: COLORS.textPrimary },
-  landmarkChipTextSelected: { color: '#FFFFFF', fontWeight: '600' },
+  landmarkChipTextSelected: { color: COLORS.textOnDark, fontWeight: '600' },
 });

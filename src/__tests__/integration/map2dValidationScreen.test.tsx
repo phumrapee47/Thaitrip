@@ -3,7 +3,7 @@ import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react-native';
 import Map2DValidationScreen from '../../screens/Map2DValidationScreen';
 import { PROVINCES } from '../../data/thailand-provinces';
-import AppNavigator from '../../navigation/AppNavigator';
+import { MapStackNavigator } from '../../navigation/AppNavigator';
 
 describe('Map2DValidationScreen (US-7)', () => {
   it('renders all 76 provinces using the raw dataset path data, with a visible count (US-7 AC1)', async () => {
@@ -31,6 +31,12 @@ describe('Map2DValidationScreen (US-7)', () => {
     // behind `if (__DEV__)`, which is what keeps it unreachable in production builds
     // (where __DEV__ is false at bundle time, a build-time constant we can't flip at
     // test runtime). This is a structural/code-level check on the gating mechanism.
-    expect(AppNavigator.toString()).toContain('__DEV__');
+    //
+    // T92 / US-28 (รอบ 7 — Bottom Tab Navigation) update: Map2DValidation now lives
+    // inside the "แผนที่" tab's own nested stack navigator (`MapStackNavigator`,
+    // exported from AppNavigator.tsx specifically so this check keeps working),
+    // rather than directly in the top-level `AppNavigator` function body (which is
+    // now the Bottom Tab Navigator itself and no longer references __DEV__ at all).
+    expect(MapStackNavigator.toString()).toContain('__DEV__');
   });
 });

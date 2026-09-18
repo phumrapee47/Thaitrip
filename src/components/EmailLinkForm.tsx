@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, TextInput, View } from 'react-native';
 import type { LinkEmailResult } from '../auth/authService';
 import { MIN_PASSWORD_LENGTH } from '../auth/authService';
-import { COLORS } from '../theme';
+import PressableScale from './PressableScale';
+import { COLORS, RADIUS, SHADOWS, SPACING } from '../theme';
 
 export interface EmailLinkFormProps {
   onSubmit: (email: string, password: string) => Promise<LinkEmailResult>;
@@ -20,6 +21,7 @@ export default function EmailLinkForm({ onSubmit, onSuccess, onCancel }: EmailLi
   const [passwordError, setPasswordError] = useState<string | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [focusedField, setFocusedField] = useState<'email' | 'password' | null>(null);
 
   function validateClientSide(): boolean {
     let valid = true;
@@ -64,46 +66,78 @@ export default function EmailLinkForm({ onSubmit, onSuccess, onCancel }: EmailLi
 
       <Text style={styles.label}>อีเมล</Text>
       <TextInput
-        style={styles.input}
+        style={[styles.input, focusedField === 'email' && styles.inputFocused]}
         placeholder="you@example.com"
         autoCapitalize="none"
         keyboardType="email-address"
         value={email}
         onChangeText={setEmail}
+        onFocus={() => setFocusedField('email')}
+        onBlur={() => setFocusedField(null)}
       />
       {emailError ? <Text style={styles.fieldError}>{emailError}</Text> : null}
 
       <Text style={styles.label}>รหัสผ่าน</Text>
-      <TextInput style={styles.input} placeholder="อย่างน้อย 6 ตัวอักษร" secureTextEntry value={password} onChangeText={setPassword} />
+      <TextInput
+        style={[styles.input, focusedField === 'password' && styles.inputFocused]}
+        placeholder="อย่างน้อย 6 ตัวอักษร"
+        secureTextEntry
+        value={password}
+        onChangeText={setPassword}
+        onFocus={() => setFocusedField('password')}
+        onBlur={() => setFocusedField(null)}
+      />
       {passwordError ? <Text style={styles.fieldError}>{passwordError}</Text> : null}
 
-      <Pressable style={[styles.submitButton, submitting && styles.submitButtonDisabled]} onPress={handleSubmit} disabled={submitting}>
+      <PressableScale
+        style={[styles.submitButton, submitting && styles.submitButtonDisabled]}
+        onPress={handleSubmit}
+        disabled={submitting}
+      >
         {submitting ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.submitButtonText}>ผูกอีเมล</Text>}
-      </Pressable>
-      <Pressable style={styles.cancelButton} onPress={onCancel} disabled={submitting}>
+      </PressableScale>
+      <PressableScale style={styles.cancelButton} onPress={onCancel} disabled={submitting}>
         <Text style={styles.cancelButtonText}>ยกเลิก</Text>
-      </Pressable>
+      </PressableScale>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 16, gap: 4 },
+  container: { padding: SPACING.md, gap: 4, backgroundColor: COLORS.background, borderRadius: RADIUS.lg, ...SHADOWS.sm },
   errorBanner: {
     backgroundColor: '#FBEAEA',
     borderColor: COLORS.danger,
     borderWidth: 1,
-    borderRadius: 8,
-    padding: 10,
-    marginBottom: 12,
+    borderRadius: RADIUS.md,
+    padding: SPACING.sm,
+    marginBottom: SPACING.sm,
   },
   errorBannerText: { color: COLORS.danger, fontSize: 13 },
-  label: { fontSize: 13, fontWeight: '600', color: COLORS.textPrimary, marginTop: 12, marginBottom: 6 },
-  input: { borderWidth: 1, borderColor: '#D9D9D9', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15 },
+  label: { fontSize: 13, fontWeight: '600', color: COLORS.textPrimary, marginTop: SPACING.sm, marginBottom: SPACING.xxs + 2 },
+  input: {
+    borderWidth: 1,
+    borderColor: '#D9D9D9',
+    borderRadius: RADIUS.md,
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: SPACING.xs + 2,
+    fontSize: 15,
+    minHeight: 44,
+  },
+  inputFocused: { borderColor: COLORS.accent, borderWidth: 2 },
   fieldError: { fontSize: 12, color: COLORS.danger, marginTop: 4 },
-  submitButton: { marginTop: 24, backgroundColor: COLORS.accent, borderRadius: 8, paddingVertical: 14, alignItems: 'center' },
+  submitButton: {
+    marginTop: SPACING.lg,
+    backgroundColor: COLORS.accent,
+    borderRadius: RADIUS.md,
+    paddingVertical: SPACING.sm + 2,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...SHADOWS.md,
+  },
   submitButtonDisabled: { opacity: 0.6 },
   submitButtonText: { color: '#FFFFFF', fontWeight: '700', fontSize: 16 },
-  cancelButton: { marginTop: 12, alignItems: 'center', paddingVertical: 8 },
+  cancelButton: { marginTop: SPACING.sm, alignItems: 'center', justifyContent: 'center', paddingVertical: SPACING.xs, minHeight: 44 },
   cancelButtonText: { color: COLORS.textSecondary, fontSize: 14 },
 });

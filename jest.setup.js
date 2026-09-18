@@ -28,6 +28,13 @@ jest.mock('@react-native-async-storage/async-storage', () =>
 // that aren't needed inside Jest and can be noisy; no-op it out.
 jest.mock('react-native-url-polyfill/auto', () => ({}));
 
+// T91/T105: expo-web-browser's native module can't run inside Jest — mocked
+// globally (same rationale as expo-image-picker above) so any NewsScreen test
+// can assert on calls without each file re-declaring this boilerplate.
+jest.mock('expo-web-browser', () => ({
+  openBrowserAsync: jest.fn(() => Promise.resolve({ type: 'dismiss' })),
+}));
+
 jest.mock('@react-native-community/datetimepicker', () => {
   const React = require('react');
   const { View } = require('react-native');

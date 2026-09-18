@@ -1,13 +1,32 @@
 import React, { useCallback, useState } from 'react';
 import { StyleSheet, useWindowDimensions, View } from 'react-native';
-import Svg, { Rect, Text as SvgText } from 'react-native-svg';
+import Animated from 'react-native-reanimated';
+import Svg, { Ellipse, Rect, Text as SvgText } from 'react-native-svg';
 import { PROVINCES, MAP_WIDTH, MAP_HEIGHT } from '../data/thailand-provinces';
 import ProvinceTile3D from './ProvinceTile3D';
-import { COLORS } from '../theme';
+import { useMountFadeIn } from '../hooks/useMountFadeIn';
+import { COLORS, RADIUS, SHADOWS, SPACING } from '../theme';
 
-// Horizontal margin kept clear on each side so the outermost provinces never
-// touch (or overflow past) the screen edge on narrow phones.
-const SIDE_MARGIN = 16;
+// T120 / US-34 AC2 + คำตัดสิน PM ข้อ 25 (docs/tasks.md, รอบ 14): the 76-tile
+// grid container fades in ONCE as a single opacity value (~280ms) — no
+// per-tile stagger, no transform on any tile — to keep the performance risk
+// of animating this specific component to the absolute minimum PM required.
+// Safety-net note: could not be verified on a real mid/low-end device inside
+// this dev environment (no physical hardware access) — see docs/dev-notes.md
+// "รอบ 14" for the full caveat; QA should confirm on-device before sign-off.
+const GRID_FADE_IN_DURATION_MS = 280;
+
+// T128 / US-36 AC1,3 (docs/design-spec.md "Map3D + ProvinceTile3D"): the SVG
+// now sits inside a "hero canvas" card (see `styles.wrapper` below) with its
+// own outer margin + inner padding, instead of sitting flush against the
+// screen edge — so the horizontal space actually free for the map is
+// (card margin + card padding) narrower on each side than before. Both
+// values come from the same tokens `styles.wrapper` uses, so this always
+// stays in sync with the card's real layout instead of drifting out of sync
+// with a separately hand-picked number.
+const CARD_MARGIN_H = SPACING.md;
+const CARD_PADDING_H = SPACING.lg;
+const SIDE_MARGIN = CARD_MARGIN_H + CARD_PADDING_H;
 
 export interface Map3DProps {
   loading: boolean;
@@ -40,6 +59,7 @@ export default function Map3D({
 }: Map3DProps) {
   const [tooltipProvinceId, setTooltipProvinceId] = useState<string | null>(null);
   const { width: windowWidth } = useWindowDimensions();
+  const fadeInStyle = useMountFadeIn(GRID_FADE_IN_DURATION_MS);
 
   // MAP_WIDTH (520) is wider than most phone screens; scale the whole SVG down
   // to fit within the screen (minus SIDE_MARGIN on each side) instead of letting
@@ -62,9 +82,20 @@ export default function Map3D({
     : null;
 
   return (
-    <View style={styles.wrapper}>
+    <Animated.View style={[styles.wrapper, fadeInStyle]}>
       <View style={styles.tiltContainer}>
         <Svg width={scaledWidth} height={scaledHeight} viewBox={`0 0 ${MAP_WIDTH} ${MAP_HEIGHT}`}>
+          {/* T128 / US-36 AC1,3: ambient ground-shadow ellipse painted BEHIND
+              every tile (first in paint order) to sell the depth of the
+              tilted 3D grid — purely decorative, doesn't touch tile geometry,
+              count, or the camera/perspective transform on `tiltContainer`. */}
+          <Ellipse
+            cx={MAP_WIDTH / 2}
+            cy={MAP_HEIGHT - 6}
+            rx={MAP_WIDTH * 0.42}
+            ry={16}
+            fill={COLORS.mapAmbientShadow}
+          />
           {PROVINCES.map((province) => (
             <ProvinceTile3D
               key={province.id}
@@ -83,19 +114,22 @@ export default function Map3D({
           ))}
           {tooltipProvince ? (
             <>
+              {/* Width follows the label length so long province names don't clip
+                  or leave an oversized pill around short ones. */}
               <Rect
-                x={tooltipProvince.centroid[0] - 34}
-                y={tooltipProvince.centroid[1] - 26}
-                width={68}
-                height={18}
-                rx={4}
-                fill="rgba(0,0,0,0.75)"
+                x={tooltipProvince.centroid[0] - (Math.max(48, tooltipProvince.nameTh.length * 7 + 16) / 2)}
+                y={tooltipProvince.centroid[1] - 28}
+                width={Math.max(48, tooltipProvince.nameTh.length * 7 + 16)}
+                height={20}
+                rx={10}
+                fill={COLORS.tooltipBg}
               />
               <SvgText
                 x={tooltipProvince.centroid[0]}
-                y={tooltipProvince.centroid[1] - 13}
-                fill="#FFFFFF"
+                y={tooltipProvince.centroid[1] - 14}
+                fill={COLORS.textOnDark}
                 fontSize={10}
+                fontWeight="600"
                 textAnchor="middle"
               >
                 {tooltipProvince.nameTh}
@@ -104,15 +138,26 @@ export default function Map3D({
           ) : null}
         </Svg>
       </View>
-    </View>
+    </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
+  // T128 / US-36 AC1,3 (docs/design-spec.md "Map3D + ProvinceTile3D" hero
+  // canvas): the map now sits in its own rounded, shadowed, tinted card
+  // instead of sitting flush on the page background — this is the ONLY
+  // styling change here; `tiltContainer`'s perspective/rotateX transform
+  // below (and every tile's own geometry) is untouched.
   wrapper: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 12,
+    marginHorizontal: CARD_MARGIN_H,
+    marginBottom: SPACING.lg,
+    paddingVertical: SPACING.lg,
+    paddingHorizontal: CARD_PADDING_H,
+    borderRadius: RADIUS.xl,
+    backgroundColor: COLORS.mapCanvasBg,
+    ...SHADOWS.lg,
   },
   tiltContainer: {
     transform: [{ perspective: 900 }, { rotateX: `${ROTATE_X_DEG}deg` }],

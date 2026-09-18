@@ -375,3 +375,438 @@ T87-T89 ทำครบตาม AC ของ US-25 ทั้ง 6 ข้อ ไ
 ### ผลการรัน (ยืนยันสุดท้ายด้วย `--runInBand`)
 - `npx tsc --noEmit -p .` — ผ่าน
 - `npx jest --runInBand` — **47/47 suites ผ่าน, 245 passed + 1 skip เดิม**
+
+---
+
+## รอบ 9: ปิด backlog เล็ก (PhotoPicker/ProvinceMasterBadge/EmailLinkForm) + หา root cause flaky test จริงจัง
+
+ทำตาม "ของที่ยังไม่ได้ทำ" ใน `docs/session-handoff.md` ทีละข้อตาม priority (ข้อ Map3D/ProvinceTile3D ข้ามไว้ก่อนตามที่ผู้ใช้เลือก เพราะเสี่ยงสูงสุด):
+
+1. **`src/components/PhotoPicker.tsx`** — thumb-zone + shimmer ตามมาตรฐาน advance:
+   - ปุ่มลบรูป (✕) ยังเป็น badge 20x20 เท่าเดิม (ไม่อยากขยาย visual ให้เกะกะ) แต่เพิ่ม `hitSlop={12}` (จากเดิม 6) ให้ tap target จริงแตะ ~44pt
+   - เปลี่ยนปุ่มลบ/ปุ่ม "+ เพิ่มรูป" จาก `Pressable` ธรรมดาเป็น `PressableScale` (haptic + spring bounce ให้สอดคล้อง component อื่นในแอป)
+   - เพิ่ม `ShimmerBlock` แสดงระหว่าง `ImageManipulator.manipulateAsync` กำลังแปลงรูป (state `isConverting`) — เดิมไม่มี feedback ระหว่างรอเลย
+   - ไม่แตะ logic การแปลง HEIC→JPEG เดิม (ยืนยันแล้วว่า `photoPickerConversionHappyPath.test.tsx` ยังผ่าน)
+
+2. **`src/components/ProvinceMasterBadge.tsx`** — ผูก `Haptics.notificationAsync(NotificationFeedbackType.Success)` ตาม SKILL.md 3.2 ในจุดเดียวกับที่ spring animation เริ่มทำงาน (`useEffect` เมื่อ `visible` เป็น `true`) — ไม่มี test ผูกกับ component นี้โดยตรงมาก่อน (ตรวจแล้วด้วย grep) จึงไม่กระทบ suite ไหน
+
+3. **`src/components/EmailLinkForm.tsx`** — ยกระดับ UI ครั้งแรก: ห่อฟอร์มด้วย token `RADIUS.lg`/`SHADOWS.sm`/`SPACING` แทน padding ดิบ, เพิ่ม focus state สี accent บน `TextInput`, เปลี่ยนปุ่ม submit/cancel เป็น `PressableScale` พร้อม `minHeight: 44` — **ไม่แตะ label/placeholder/ข้อความ error ใดๆ เลย** เพราะ `src/__tests__/qa-round2/emailLinkIntegrity.test.tsx` ผูก assertion กับข้อความพวกนี้ตรงๆ (ยืนยันผ่านครบหลังแก้)
+
+### หา root cause flaky test จริงจัง (ของค้างจากรอบ 8)
+รอบ 8 เคยเจอ suite fail แบบ `Exceeded timeout of 5000ms` ตอนรัน `npx jest` (parallel) แล้วสรุปแค่ว่าเป็น "resource contention" โดยยังไม่ได้แก้ที่ root cause จริง รอบนี้ reproduce ซ้ำได้ 100% (เครื่องนี้มี 24 logical CPUs → jest สั่ง maxWorkers เท่า CPU count โดย default):
+- รัน `npx jest` (parallel เต็ม, ไม่ตั้งค่าอะไร) → **4 suites fail** ด้วย timeout 5000ms (เวลารวม ~68s)
+- ลองเพิ่ม `testTimeout` เป็น 15000ms เฉยๆ (ไม่แก้ concurrency) → **แย่ลง**: 8 suites fail, เวลารวมพุ่งเป็น ~188s — เพราะ test ที่หนักขึ้นแต่ละตัวถือ CPU ไว้นานขึ้น ยิ่งขยายหน้าต่างการแย่ง CPU ระหว่าง worker แทนที่จะแก้
+- สรุป root cause จริง: **จำนวน jest worker (=จำนวน CPU) เยอะเกินไปเมื่อเทียบกับ CPU/memory ที่แต่ละ worker ต้องใช้จริงสำหรับ integration test ที่ render ทั้งแอป stack** (เช่น `emailLinkIntegrity.test.tsx`/`migrationNonBlocking.test.tsx` ที่ mount `AuthProvider`+`JournalProvider`+`CheckinProvider`+`NavigationContainer`+หลายหน้าจอพร้อม `Map3D` SVG) — ยิ่งรันพร้อมกันมากยิ่งแย่งกันจนพังทุกตัว
+- แก้จริงด้วยการจำกัด **`"maxWorkers": 4`** ใน `package.json` (`jest` config) แทนการเพิ่ม timeout — ผลคือเสถียร **และเร็วขึ้นด้วย**: รัน `npx jest` (parallel, maxWorkers=4) ซ้ำ 3 รอบติดกัน ได้ **47/47 suites ผ่านทุกรอบ** ที่ ~15-22s ต่อรอบ (เทียบกับ `--runInBand` เดิมที่ ~45s และ parallel เต็มที่พังที่ ~68-188s)
+- **บทเรียน**: ปัญหา "test timeout ตอนรัน parallel" บนเครื่องที่มี CPU เยอะ ไม่ได้แปลว่าต้องเพิ่ม `testTimeout` เสมอไป (อาจทำให้แย่ลงอย่างที่เจอ) ให้ลองจำกัด `maxWorkers` ก่อน โดยเฉพาะถ้า suite ส่วนใหญ่เป็น full-app-stack integration test ที่หนัก
+
+### ผลการรัน
+- `npx tsc --noEmit -p .` — ผ่าน ไม่มี error
+- `npx jest --runInBand` — 47/47 suites ผ่าน, 245 passed + 1 skip (baseline เดิม ไม่เปลี่ยน)
+- `npx jest` (parallel, ตั้งค่าใหม่ `maxWorkers: 4`) — **47/47 suites ผ่าน 3 รอบติดกัน**, ~15-22s/รอบ (เร็วกว่าเดิมและไม่ flaky อีกต่อไป)
+
+---
+
+## รอบ 10: Map3D.tsx / ProvinceTile3D.tsx redesign (ข้อสุดท้ายใน backlog)
+
+ข้อเดียวที่เหลือจาก session-handoff — ทำแบบ **additive only** (ไม่แตะ contract ที่ test ผูกอยู่) เพราะความเสี่ยงสูงตามที่ประเมินไว้ก่อนหน้า: ไม่แก้ accessibilityLabel format, ไม่แก้ signature ของ `onPress`/`onLongPress`/`onPressOut`/`onUnlockAnimationDone`, ไม่แก้ rotateX tilt, ไม่แก้จำนวน/โครงสร้าง tile (ยังคง 76 จังหวัด tile ละหนึ่ง) — ยืนยันแล้วด้วย `map3d.test.tsx` (7 suites/31 tests ที่เกี่ยวข้องผ่านครบ)
+
+สิ่งที่เพิ่ม (`src/components/ProvinceTile3D.tsx`):
+1. **Haptic บนทุกแตะ tile**: `Haptics.impactAsync(Light)` ใน `handlePress` ก่อนเรียก `onPress(province.id)` เดิม (ตาม SKILL.md 3.2 "แตะปุ่มทั่วไป")
+2. **Haptic ตอนปลดล็อกจังหวัด**: `Haptics.notificationAsync(Success)` ในสาขา `isJustUnlocked` ของ `useEffect` เดิม (ก่อนเริ่ม `withSpring`) — น้ำหนักเดียวกับที่ผูกไว้กับ `ProvinceMasterBadge` ในรอบ 9 ไม่ได้แตะ logic การเรียก `onUnlockAnimationDone` เลย (ยังผูกกับ callback ของ `withSpring` ตัวเดิม)
+3. **Ring pulse ฉลองตอนปลดล็อก**: เพิ่ม `AnimatedCircle` ที่ centroid ของ tile, ขยาย r + fade opacity ภายใน 550ms ด้วย shared value ใหม่ (`ringScale`/`ringOpacity`) แยกอิสระจาก `lift` — เป็นแค่ภาพประกอบ ไม่กระทบ timing ของ callback ใดๆ
+4. **Shimmer skeleton ระหว่างโหลด**: เพิ่ม shared value `shimmerOpacity` วนด้วย `withRepeat` (pulse 1↔0.55 ทุก 700ms) ผูกกับ `isLoading` แทนสีเทาแบนนิ่งเดิม (`lockedTopLoading`) ให้ความรู้สึกเดียวกับ `ShimmerBlock` ที่ใช้ทั่วแอป — reset กลับ opacity 1 ทันทีที่โหลดเสร็จ
+
+สิ่งที่ปรับ (`src/components/Map3D.tsx`):
+- Tooltip (long-press) ปรับความกว้างของกล่องให้ตามความยาวชื่อจังหวัดจริง (`Math.max(48, nameTh.length*7+16)`) แทนความกว้างคงที่ 68 เดิม (ชื่อจังหวัดยาวๆ เช่น "นครศรีธรรมราช" เคยล้นกล่องเดิม), ปรับ `rx` เป็น 10 (โค้งมนขึ้น) และสีพื้นหลังให้เข้ม/นุ่มขึ้นเล็กน้อย — ไม่แตะ logic การโชว์/ซ่อน tooltip เลย
+
+### ผลการรัน
+- `npx tsc --noEmit -p .` — ผ่าน ไม่มี error
+- `npx jest map3d map2dValidation provinceMasterLiveMap landmarkMap --runInBand` — 7/7 suites ผ่าน, 31 passed + 1 skip เดิม
+- `npx jest` (parallel, `maxWorkers: 4`) เต็มชุด — **47/47 suites ผ่าน**, 245 passed + 1 skip, ~18s
+
+### Backlog ปิดครบแล้วทุกข้อจาก session-handoff.md เดิม (PhotoPicker, ProvinceMasterBadge, EmailLinkForm, flaky test root cause, Map3D redesign)
+
+---
+
+## รอบ 11: US-26 — เปิด Global Search ให้ค้นหาทั่วประเทศผ่าน Wikipedia (แก้ pain point "search ได้แค่สถานที่ popular")
+
+### บริบท / การตรวจสอบก่อนแก้
+ผู้ใช้แก้ไฟล์เองระหว่างเซสชัน (นอก pipeline, ไม่ผ่านผมเลย) เพิ่มฟีเจอร์ resolve รูปจริงแบบ dynamic (`resolveRealPhotoForLandmark`) และ live search ใน `LandmarkList.tsx` — ตรวจแล้วผ่านทั้ง `tsc`/`jest` หลังแก้ bug 1 จุด (เทสต์ `landmarkCardsWikipediaIntegration.test.tsx` auto-mock `searchAttractionsGlobal` เป็น `undefined` ทำให้ `liveResults.filter` crash — แก้ที่ stub ของเทสต์ ไม่แก้ production code)
+
+จากนั้นผู้ใช้ร้องเรียนว่า "search หาสถานที่ท่องเที่ยวได้น้อยมาก เหมือนหาได้แค่ที่ popular ที่เลือกมาโชว์" ถามกลับผู้ใช้ว่าหมายถึงช่องค้นหาไหน — คำตอบ: **ช่องค้นหาหน้า Home (`GlobalSearchBar.tsx`)** ไม่ใช่ช่องค้นหาในหน้าจังหวัด (`LandmarkList.tsx`) ตรวจโค้ดพบว่า `GlobalSearchBar` ค้นหาจาก **`LANDMARKS` (static seed dataset ใน `thailand-landmarks.ts`) เท่านั้น** ไม่เคยแตะ Wikipedia เลย — ตรงกับอาการที่ร้องเรียนเป๊ะ
+
+**พบข้อกำหนดเดิมที่ขัดกันโดยตรงก่อนแก้**: `src/__tests__/qa-round4/globalSearchBarDropdown.test.tsx` มี test ยืนยัน **US-24 AC เดิม**: "GlobalSearchBar must not call fetch — it is local-dataset-only" (mock `global.fetch` ให้ throw ถ้าถูกเรียก) — เป็น trade-off ที่ตั้งใจไว้แต่แรก (เร็ว+offline แลกกับ coverage แคบ) ถามผู้ใช้ก่อนแก้ — **เลือก "เปิดให้ค้นหา online ได้ด้วย"** จึงต้อง revise AC เดิมเป็น US-26 (เพิ่ม entry ใหม่ใน `docs/requirements.md`, ไม่แก้ US-24 เดิมทับ)
+
+### การแก้ไข
+
+**`src/services/wikipediaService.ts`**:
+- เพิ่ม `resolveProvinceFromCategories()` — reverse ของ convention เดิมใน `fetchAttractionsForProvince` (category name เช่น "หมวดหมู่:สถานที่ท่องเที่ยวในจังหวัดภูเก็ต"): เช็คว่า category ของบทความมีชื่อจังหวัดไหนใน `PROVINCES` เป็น substring หรือไม่ ใช้ resolve `provinceId` ให้ผลลัพธ์ค้นหาแบบ global (เดิม global search ไม่เคยรู้ provinceId เลย คืนค่า `''` เสมอ — นำทางไม่ได้)
+- `searchAttractionsGlobal(keyword)`: **ตัด parameter `provinceNameTh` ออก** — เดิมโค้ดของผู้ใช้ (LandmarkList) ส่ง provinceNameTh ปัจจุบันเข้าไปต่อท้าย query (`${q} ${provinceNameTh}`) ซึ่งเป็นบั๊กที่ทำให้ "ค้นหาทั่วไทย" กลายเป็นค้นหาเฉพาะจังหวัดที่ผู้ใช้กำลังดูอยู่โดยไม่ตั้งใจ (นี่คือสาเหตุหลักอีกจุดของ pain point) เพิ่ม `gsrlimit` จาก 12 → 20 และดึง `categories` (`cllimit=30`) เพิ่มจาก API มาด้วยเพื่อ resolve provinceId
+- Photo resolution สำหรับผลลัพธ์ search ที่ยังไม่มีรูป: เปลี่ยนไปใช้ **province ที่ resolve ได้ของผลลัพธ์นั้นเอง** (ไม่ใช่ province ปัจจุบันที่ caller กำลังดูอยู่) แก้บั๊กแฝงอีกจุดที่ context ผิดจังหวัดสำหรับผลลัพธ์ search ข้ามจังหวัด
+- ลบ export `searchAttractionsLive` (alias ที่ไม่มีใครเรียกใช้เลย — dead code จากการแก้ไขของผู้ใช้)
+
+**`src/components/LandmarkList.tsx`**: แก้ call site `searchAttractionsGlobal(trimmed, provinceNameTh)` → `searchAttractionsGlobal(trimmed)` ให้ตรงกับ signature ใหม่ (ได้ผลพลอยได้: search ในหน้าจังหวัดก็ครอบคลุมกว้างขึ้นด้วยเช่นกัน)
+
+**`src/components/GlobalSearchBar.tsx`** (แก้ไขหลักของรอบนี้):
+- คงพฤติกรรมเดิม (US-24 AC เดิม) ไว้ทั้งหมด: ค้นหา local dataset (จังหวัด + `LANDMARKS`) แบบ synchronous ทันที ไม่พึ่ง network
+- เพิ่ม debounce 450ms (เหมือน pattern ใน `LandmarkList.tsx`) ยิง `searchAttractionsGlobal(trimmed)` แบบ nationwide ต่อจากนั้น merge เข้ากับผลลัพธ์ local (dedupe ด้วยชื่อ, กรองทิ้งผลลัพธ์ที่ resolve provinceId ไม่ได้เพราะนำทางไม่ได้)
+- เพิ่ม `ActivityIndicator` ตรงตำแหน่งปุ่ม clear ระหว่างค้นหา + แถว "กำลังค้นหาทั่วประเทศไทย..." ท้าย dropdown ระหว่างรอ (ไม่บล็อกผลลัพธ์ local ที่ขึ้นอยู่แล้ว)
+
+### แก้ test ให้ตรงกับ scope ใหม่
+- `globalSearchBarDropdown.test.tsx`: เปลี่ยนจากยืนยัน "ไม่เรียก fetch เด็ดขาด" เป็น "**path local ไม่เรียก fetch**" — ใช้ `jest.useFakeTimers()` ไม่ advance เวลาเลย ทำให้ debounce timer ของ online search ไม่มีทางทำงานใน test นี้ได้จริง (แทนที่จะหวังจังหวะเวลา)
+- `globalSearchBarProvinceSelection.test.tsx`, `globalSearchBarSelection.test.tsx`, `globalSearchBarLandmarkMatch.test.tsx`, `globalSearchBarEdgeCase.test.tsx`: **4 ไฟล์นี้ไม่เคย mock `wikipediaService`/`fetch` มาก่อน** (ไม่จำเป็นตอนที่ component ยังเป็น local-only) พอเพิ่ม live search เข้าไป การพิมพ์ query ≥2 ตัวอักษรจะ schedule real `setTimeout` 450ms ที่เรียก `fetch` จริงไปหา Wikipedia ถ้า cleanup (unmount) ไม่ทันจังหวะ — เพิ่ม `jest.mock('../../services/wikipediaService', () => ({ searchAttractionsGlobal: jest.fn().mockResolvedValue([]) }))` ทั้ง 4 ไฟล์กันไว้ ตรงตาม convention เดิมของโปรเจกต์ที่ไม่ยอมให้ test แตะ network จริงเด็ดขาด
+- เพิ่ม test ใหม่ 2 ไฟล์คุม US-26 โดยตรง: `globalSearchBarLiveWikipediaSearch.test.tsx` (ผลลัพธ์ resolve provinceId ได้ → แสดง+นำทางได้) และ `globalSearchBarLiveWikipediaUnresolvedProvince.test.tsx` (resolve ไม่ได้ → ไม่แสดง) — ใช้ `jest.useFakeTimers()` + `jest.advanceTimersByTimeAsync(450)` แทน real timer เพื่อความ deterministic (ตอนแรกลองรวมเป็น 2 `it()` ในไฟล์เดียวด้วย real timer ตาม pattern เดิมของ `landmarkCardsWikipediaIntegration.test.tsx` แต่เจอ "overlapping act() calls" ข้ามเทสต์ทำให้เทสต์ที่สองพัง (`render` ไม่ผูก `screen` ให้) — ตรงกับกับดักเดิมที่เอกสารไว้ใน `map3d.test.tsx` comment เรื่อง sequential interaction ใน RTL/reanimated combo นี้ แก้ด้วยการแยกไฟล์ + fake timers ตาม convention เดียวกัน)
+
+### ผลการรัน
+- `npx tsc --noEmit -p .` — ผ่าน
+- `npx jest globalSearchBar` (รวมไฟล์ใหม่) — 8/8 suites ผ่าน
+- `npx jest` เต็มชุด รันซ้ำ 3 รอบติดกัน — **49/49 suites ผ่านทุกรอบ**, 247 passed + 1 skip, ~15-17s/รอบ
+
+### เอกสาร
+- เพิ่ม **US-26** ใน `docs/requirements.md` (ไม่แก้ US-24 เดิมทับ) พร้อม mark บรรทัด Out-of-Scope เดิมที่พูดถึงเรื่องนี้ว่า superseded
+
+---
+
+## รอบ 12: US-27 — ฝัง TAT open-data landmark dataset ให้ 74/76 จังหวัดมีข้อมูลทันที (offline)
+
+### บริบท
+ผู้ใช้เจอ dataset เปิดของ TAT (การท่องเที่ยวแห่งประเทศไทย) ที่ `datacatalog.tat.or.th` — โหลดมาตรวจสอบจริงก่อนตัดสินใจ (ไม่เดา): ไฟล์ดิบ 32MB, **8,634 รายการครอบคลุม 78 จังหวัด**, ทุกรายการมีพิกัด GPS จริงและชื่อไทย, แต่**ไม่มี field รูปภาพเลยแม้แต่ field เดียว** (เช็คครบทั้ง 59 field) — แจ้งผู้ใช้ล่วงหน้าว่ารูปภาพจะยังต้องพึ่ง `resolveRealPhotoForLandmark` เดิม (US-26) ผู้ใช้ยืนยันรับได้ ("รูปภาพเราหาโหลดภายหลังเอาได้ไม่เป็นไร") โฟกัสแค่ "search ไวขึ้น + มีข้อมูลรองรับอยู่แล้ว ไม่ต้องรอ"
+
+### การตรวจสอบก่อนแก้ (สำคัญ — ป้องกันทำลาย test ที่ผ่านอยู่แล้ว)
+ก่อนเขียนสคริปต์ ตรวจสอบ `src/data/thailand-landmarks.ts` ปัจจุบันก่อนพบว่า **45/76 จังหวัดมีข้อมูลแล้ว** (8 pilot hand-curated จาก T35 + 37 จาก OSM Overpass merge T60/T61 ที่เคยรันไปแล้วในรอบก่อนๆ ของโปรเจกต์ — grep แรกของผมพลาดนับเฉพาะ single-quote string เจอแค่ 8 จังหวัด ต้องแก้ regex ให้จับทั้ง `'...'` และ `"..."` ถึงเจอ 45 จริง) เหลือ **31 จังหวัดว่างเปล่า**
+
+ก่อน merge ข้อมูลใหม่ grep หา test ที่ผูกกับ "จังหวัดว่างเปล่า" เป็น fixture โดยเฉพาะ (ไม่ใช่แค่เดา) เจอ **2 จังหวัดที่ต้องคงว่างไว้ตลอดไป**:
+- `si-sa-ket` — ใช้ใน `src/components/LandmarkList.test.tsx` และ `src/__tests__/qa-round4/landmarkCardsWikipediaIntegration.test.tsx` (AC6 "no local data" empty state)
+- `chaiyaphum` — ใช้ใน `src/__tests__/integration/landmarkCheckin.test.tsx` และ `src/__tests__/qa-round3/landmarkMapIntegration.test.tsx`
+
+ยืนยัน 2 จังหวัดนี้คือทั้งหมดที่ต้องกันไว้ด้วยการ cross-reference ทุก `provinceId` literal ที่ปรากฏใน `*.test.ts(x)` กับรายชื่อ 31 จังหวัดว่าง — เจอตรงกัน 2 ตัวนี้เท่านั้น จึงกันไว้ ที่เหลือ **29 จังหวัด** เป็นเป้าหมายจริงของรอบนี้
+
+### สิ่งที่สร้าง/แก้
+1. **`scripts/lib/tat-extract-core.ts`** (pure, ไม่แตะ network) — `parseTatLocation` (parse "lat, lng" string + ตรวจ bounding box จริงของประเทศไทยกันพิกัดสลับ/ต่างประเทศหลุดเข้ามา), `stripHtml` (ตัด HTML tag/entity จาก rich-text field ของ TAT), `selectTopTatLandmarks` (คัด top 15/จังหวัด ให้ priority รายการที่มี description จริงก่อน, สร้าง `id: tat-<ATT_ID>` จาก ID จริงของภาครัฐที่ unique อยู่แล้ว ไม่ slugify ชื่อเอง)
+   - **หมายเหตุสำคัญ**: `detectCategory` เป็น**สำเนาแยกต่างหาก**จาก `src/services/wikipediaService.ts` ไม่ได้ import ตรงๆ เพราะไฟล์นั้น import `'../data/thailand-provinces'` แบบไม่มี extension ซึ่ง Node's native ESM loader (ที่ใช้รันสคริปต์ตรงๆ ไม่ผ่าน bundler) resolve ไม่ได้ — เจอ error `ERR_MODULE_NOT_FOUND` ตอนรันจริง แก้โดย copy ฟังก์ชันมาแทนที่จะแก้ import ของ app source (ตรงกับ pattern เดิมของ `overpass-extract-core.ts` ที่ไม่ import จาก `src/services/*` อยู่แล้วด้วยเหตุผลเดียวกัน)
+2. **`scripts/lib/tat-extract-core.test.ts`** — 14 unit tests ครอบคลุม parse/strip/select/cap/dedupe/priority ทั้งหมด (ผ่านครบก่อนรัน CLI จริง)
+3. **`scripts/extract-tat-landmarks.ts`** (CLI, network) — เช็ค `alreadyCovered` จาก `LANDMARKS` import จริง (ไม่ hardcode รายชื่อ 45 จังหวัด เพื่อให้ถูกต้องเสมอถ้า coverage เปลี่ยนในอนาคต) ลบ 2 จังหวัด fixture ออกจาก target แล้วดาวน์โหลด+ประมวลผล เขียนผลลัพธ์ trim แล้วไปที่ `scripts/output/tat-landmarks.json`
+4. **`scripts/merge-landmarks.ts`** ขยายให้รองรับ field `description`/`category` เพิ่ม (ของเดิมจาก Overpass มีแค่ id/provinceId/nameTh/lat/lng) และเพิ่ม `--label` arg ให้ comment header ของแต่ละ block ระบุแหล่งที่มาได้ถูกต้อง (ของเดิม hardcode "T60/T61 Overpass extraction" ทุก block)
+
+### รันจริง
+- `node scripts/extract-tat-landmarks.ts` — ดาวน์โหลด 8,634 record จริง, จับคู่ชื่อจังหวัดไทยกับ `PROVINCES.nameTh` ได้ตรง **100% ทั้ง 29 จังหวัดเป้าหมาย** (ตรวจสอบ exact-match ล่วงหน้าด้วยสคริปต์แยกก่อนเขียนโค้ดจริง ไม่ได้เดา) ได้ผลลัพธ์ 15 landmark/จังหวัด ครบทุกจังหวัด = 435 รายการ
+- `node scripts/merge-landmarks.ts --in scripts/output/tat-landmarks.json --label "US-27 TAT open-data extraction"` — merge สำเร็จ, `thailand-landmarks.ts` จาก 209 → 644 รายการ, จาก 45 → **74/76 จังหวัดมีข้อมูล**
+
+### แก้ test ที่ผูกกับตัวเลข coverage เดิม (คาดไว้ล่วงหน้า พังตามคาด แก้แล้ว)
+`src/__tests__/qa-round3/landmarkDataIntegrity.test.ts` มี hard-coded invariant ล็อกไว้จาก QA round 3 เดิม (45 จังหวัด, cap 5/จังหวัด) — อัปเดต:
+- "exactly 45 provinces" → "exactly 74 provinces" (76 - 2 fixture)
+- "31 provinces empty, sample 1" → "เช็คตรงๆ ว่า withoutData คือ `[chaiyaphum, si-sa-ket]` เป๊ะ" (เข้มกว่าเดิมที่เช็คแค่ sample ตัวเดียว)
+- "cap ≤5" → "cap ≤15" (`MAX_LANDMARKS_PER_PROVINCE` ใหม่จาก TAT)
+- เพิ่ม test ใหม่: ทุก landmark ที่ id ขึ้นต้น `tat-` ต้องมี description+category ไม่ว่าง (field ที่ Overpass merge เดิมไม่เคยมี)
+- ไม่แตะ test อื่นในไฟล์เดียวกันเลย (duplicate id, orphan provinceId, lat/lng pairing, pilot-8 backward-compat, byte-identical spot-check) — รันแล้วผ่านหมดโดยไม่ต้องแก้
+
+### ผลการรัน
+- `npx tsc --noEmit -p .` — ผ่าน
+- `npx jest landmarkDataIntegrity` — 17/17 ผ่าน (รวม test ใหม่)
+- `npx jest` เต็มชุด รันซ้ำ 3 รอบติดกัน — **50/50 suites ผ่านทุกรอบ**, 262 passed + 1 skip (เพิ่มจาก 247 เพราะ unit test ใหม่ 14 ตัว + integrity test ใหม่ 1 ตัว), ~14s/รอบ — **ไม่มี test อื่นนอกเหนือจาก landmarkDataIntegrity.test.ts พังเลยแม้แต่ตัวเดียว** ยืนยันว่าการกันจังหวัด fixture ไว้ถูกต้องครบถ้วน
+
+### เอกสาร
+- เพิ่ม **US-27** ใน `docs/requirements.md` พร้อมสมมติฐาน/ACเต็ม ไม่แก้ US-26 เดิมทับ
+
+---
+
+## รอบ 13: แก้ gap จริงที่ผู้ใช้เจอ — "ค้นหา ชะอำ ไม่เจอทั้งที่มีใน dataset" (แก้ US-27 ให้สมบูรณ์)
+
+### บริบท: บั๊กที่ผู้ใช้เจอจริงหลังรอบ 12
+ผู้ใช้ค้นหา "ชะอำ" (หาดชะอำ จ.เพชรบุรี — สถานที่ท่องเที่ยวชื่อดังระดับประเทศ) แล้วไม่เจออะไรเลย ทั้งที่ยืนยันว่ามีอยู่ใน dataset ที่ให้ไป ตรวจสอบแล้วพบ **2 root cause ซ้อนกัน**:
+
+1. **เพชรบุรีไม่เคยถูก merge ข้อมูล TAT เลย** — สคริปต์รอบ 12 (`extract-tat-landmarks.ts`) เดิม target เฉพาะ "จังหวัดที่มี landmark เป็น 0" (31 จังหวัด) เท่านั้น แต่เพชรบุรีมี **5 landmark เดิมจาก OSM merge เก่า (T60/T61)** อยู่แล้ว (ชื่อสถานที่ทั่วไป ไม่มี "ชะอำ" เลย) จึงถูกข้ามไปทั้งจังหวัด — grep เจอว่ามีทั้งหมด **37 จังหวัด** ที่ตกอยู่ในสถานการณ์เดียวกัน (มี OSM landmark บางๆ 2-5 รายการ ไม่มี description/category และไม่เคยได้รับข้อมูล TAT เสริมเลย)
+2. **ต่อให้จังหวัดถูก merge ก็ยังพลาดได้**: ทดสอบจริงพบว่า "หาดชะอำ" ไม่ติด top-15 ของเพชรบุรี (92 รายการดิบ) เพราะ heuristic เดิม (`selectTopTatLandmarks`) จัดลำดับด้วย "มี description หรือไม่" — **หาดชะอำไม่มีทั้ง `ATT_HILIGHT` และคำอธิบายยาวเป็นพิเศษ** (เป็นสถานที่เก่าแก่ตั้งแต่ปี 2009 ที่ TAT ไม่ต้องเขียนคำโปรยการตลาดให้ เพราะมันดังอยู่แล้ว ตรงข้ามกับสถานที่ท่องเที่ยวชุมชนใหม่ๆ ที่เพิ่งลงทะเบียนปี 2023-2025 ซึ่งมักมี `ATT_HILIGHT` เพราะ TAT ต้องช่วยโปรโมท) ทดลองเปลี่ยนเป็นจัดลำดับตามความยาว description แทนก็ยังไม่ติด (อันดับ 45/92 — dataset นี้มีสถานที่ที่เขียนคำอธิบายยาวกว่าเยอะมาก) **สรุปว่าไม่มี field ไหนใน dataset นี้ที่บ่งบอกความ "ดัง/notable" ได้น่าเชื่อถือเลย** — cap แบบ "top N" ตัดสถานที่ดังทิ้งแบบสุ่มได้เสมอ ไม่ว่าจะใช้ heuristic ไหน
+
+### การแก้ไข (2 ทาง — ทั้งเสริมข้อมูลจริงและแก้ architecture การค้นหา)
+
+**1) เสริม TAT data ให้ 37 จังหวัดที่มีแค่ OSM data เดิม (ไม่แตะ 8 pilot):**
+- `scripts/lib/tat-extract-core.ts`: `selectTopTatLandmarks` เพิ่ม parameter `limit` (default = `MAX_LANDMARKS_PER_PROVINCE`) ให้เรียกแบบ "เติมให้ครบ cap รวม" ได้ (เช่น จังหวัดมี OSM อยู่แล้ว 5 → เรียกด้วย `limit=10` เพื่อให้รวมแล้วไม่เกิน 15)
+- `scripts/extract-tat-landmarks.ts`: เปลี่ยน target จาก "จังหวัดที่ landmark=0" เป็น **"ทุกจังหวัดยกเว้น 8 pilot + 2 fixture"** (66 จังหวัด) คำนวณ `remainingSlots = 15 - จำนวนที่มีอยู่แล้ว` ต่อจังหวัด ถ้า ≤0 ข้ามเลย (จังหวัดที่ merge TAT ไปแล้วในรอบ 12 จะได้ remainingSlots=0 พอดี ทำให้รันซ้ำได้แบบ idempotent)
+- `scripts/merge-landmarks.ts`: เปลี่ยน eligibility check จาก **"จังหวัดมี entry อยู่แล้วหรือยัง" (province-level)** เป็น **"id นี้มีอยู่แล้วหรือยัง" (id-level) + เช็ค pilot province ตรงๆ แยกต่างหาก** — เพราะ logic เดิมคือสาเหตุ root cause #1 (มันปฏิบัติกับ "จังหวัดที่มี OSM data บางๆ" เหมือนกับ pilot province ที่ห้ามแตะ ทั้งที่ควรเติมได้)
+- รันจริง: `node scripts/extract-tat-landmarks.ts --out scripts/output/tat-landmarks-batch2.json` → ได้ 377 landmark ใหม่ครอบคลุม 37 จังหวัด (29 จังหวัดจาก batch แรกขึ้น "already at cap, skipping" ถูกต้องตามคาด) → merge เข้า `thailand-landmarks.ts` (label "batch 2 — top up existing OSM provinces") → **1,019 landmarks ครอบคลุม 74/76 จังหวัดเหมือนเดิม แต่ไม่มีจังหวัดไหนเกิน cap 15 เลย** (ตรวจสอบแล้วด้วยสคริปต์นับจริง)
+
+**2) แก้ปัญหาเชิง architecture: แยก "search index" ออกจาก "display list" (แก้ root cause #2):**
+เนื่องจากพิสูจน์แล้วว่าไม่มี heuristic ไหนเชื่อถือได้ 100% สำหรับเลือก "top 15 ที่ควรโชว์" ให้ครอบคลุมทุกสถานที่ดัง จึงตัดสินใจไม่พยายามแก้ heuristic ต่อ (เสียเวลาไม่คุ้ม) แต่แยกปัญหาออกเป็น 2 concern ต่างกัน:
+- **List ที่โชว์ตอนเปิดหน้าจังหวัด**: ยังคง cap ที่ 15 ต่อไป (ดีต่อ UX, bundle size) — ใช้ `selectTopTatLandmarks` เหมือนเดิม
+- **การค้นหา (search)**: ต้องครอบคลุม**ทุกสถานที่จริงในจังหวัดนั้น** ไม่ใช่แค่ 15 ที่ถูกเลือกมาโชว์ — สร้างไฟล์ใหม่ `src/data/tat-search-index.ts` (auto-generated, ห้ามแก้มือ) ผ่าน `scripts/extract-tat-search-index.ts` + `buildSearchIndexEntries()` ใน `tat-extract-core.ts` (ไม่ cap เลย ไม่มี description/category เก็บแค่ id/provinceId/nameTh/lat/lng ให้ไฟล์เบาที่สุด)
+- รันจริง: ได้ **6,319 รายการ ครอบคลุม 66 จังหวัด ไฟล์ขนาด ~1MB** (ยืนยันด้วย unit test ว่า "หาดชะอำ" ผ่านเข้า index นี้แน่นอนแม้ไม่มี description เลย — ตรงข้ามกับ `selectTopTatLandmarks` ที่จะตัดทิ้ง)
+- `src/components/GlobalSearchBar.tsx`: เพิ่ม step 3 ค้นหาใน `TAT_SEARCH_INDEX` ต่อจาก `LANDMARKS` เดิม (dedupe ด้วย `id` ที่เจอไปแล้วจาก LANDMARKS กัน pop ซ้ำ) ยังคงเป็น**local instant search ล้วนๆ ไม่แตะ network เลย** (แค่ array ที่ใหญ่ขึ้น ไม่ใช่ debounce/fetch ใหม่) จึงไม่กระทบ US-24 AC5 (revised) ที่ยังต้องพิสูจน์ว่า path นี้ไม่เรียก fetch
+
+### Unit tests ใหม่
+`scripts/lib/tat-extract-core.test.ts`: เพิ่ม 5 test ครอบคลุม `limit` parameter ของ `selectTopTatLandmarks` (custom limit, limit≤0) และ `buildSearchIndexEntries` ทั้งหมด (ไม่ cap, หา "หาดชะอำ" เจอจริงตามเคสที่เจอบั๊ก, ยัง drop record ที่ไม่มีชื่อ/พิกัด, ไม่มี description/category ติดมาด้วย) — รวมเป็น 21/21 ผ่าน
+
+### บั๊กที่เจอระหว่างแก้ (ไม่ใช่ production code — แก้ที่ test)
+เทสต์ `globalSearchBarLiveWikipediaSearch.test.tsx` (เขียนไว้รอบ 11) ใช้ query จำลอง "ไอ้ไข่" ซึ่ง**บังเอิญเป็นสถานที่จริง** (วัดเจดีย์ไอ้ไข่ จ.นครศรีธรรมราช) ที่ตอนนี้มีอยู่จริงใน `tat-search-index.ts` แล้ว (นครศรีธรรมราชเป็นหนึ่งใน 37 จังหวัดที่เพิ่งเติมข้อมูล) ทำให้ผลลัพธ์จริงจาก local search กับผลลัพธ์ mock จาก Wikipedia ชนกัน (`getByText` เจอ 2 elements ที่ subtitle เดียวกัน) — แก้โดยเปลี่ยนชื่อ/query ในเทสต์ให้เป็นคำสมมติที่ไม่มีทางชนกับข้อมูลจริงในอนาคต (ไม่แก้ production code เพราะพฤติกรรมนี้ถูกต้องแล้ว — เป็นสัญญาณยืนยันว่าการแก้ทำงานได้จริง)
+
+### ผลการรัน
+- `npx tsc --noEmit -p .` — ผ่าน
+- `npx jest scripts/lib/tat-extract-core` — 21/21 ผ่าน
+- `npx jest` เต็มชุด รันซ้ำ 3 รอบติดกัน — **50/50 suites ผ่านทุกรอบ**, 269 passed + 1 skip, ~14s/รอบ
+
+### ไฟล์ที่ได้
+- `src/data/thailand-landmarks.ts`: 644 → **1,019 landmarks**, ยังคง 74/76 จังหวัด, ไม่มีจังหวัดไหนเกิน cap 15
+- `src/data/tat-search-index.ts` (ใหม่, auto-generated ~1MB): **6,319 รายการ ครอบคลุม 66 จังหวัด** สำหรับ search เท่านั้น ไม่โชว์เป็นการ์ดปกติ
+
+---
+
+## รอบ 14: แก้บั๊กผู้ใช้รายงาน 2 เรื่อง — "กด search result แล้วค้าง" + "หน้าจังหวัดเลื่อนไม่ได้"
+
+### บั๊ก 1: กด global search result แล้วไม่มีอะไรเกิดขึ้น (เหมือนค้าง)
+
+**Root cause ที่ยืนยันแล้ว (ไม่ใช่แค่เดา):** `HomeScreen.tsx` ครอบทั้งหน้าด้วย `<ScrollView>` (บรรทัด 77 เดิม) ที่**ไม่ได้ตั้ง `keyboardShouldPersistTaps`** (default = `"never"`) และ `GlobalSearchBar` (ทั้ง `TextInput` และ dropdown ผลลัพธ์) เป็น descendant ของ ScrollView ตัวนี้ ขณะ `TextInput` โฟกัสอยู่ (กำลังพิมพ์ค้นหา) การแตะที่ผลลัพธ์ในดรอปดาวน์ (ซึ่งอยู่ใน `ScrollView` ลูกของตัวเองที่ตั้ง `keyboardShouldPersistTaps="handled"` ไว้ถูกต้องอยู่แล้ว) จะโดน **ScrollView ชั้นนอกสุดของ HomeScreen ดักไว้ก่อน** เพราะมันไม่รู้ว่าต้อง "handled" เหมือนกัน — RN จะถือว่าการแตะครั้งแรกคือการ dismiss keyboard แล้วกลืน event ทิ้ง ไม่ปล่อยให้ `onPress` ของผลลัพธ์ทำงานเลย — ตรงกับอาการที่ผู้ใช้รายงานทุกจุด (กดแล้วเหมือนค้าง ไม่ navigate ไม่ปิด dropdown)
+
+**ทำไม unit test เดิมทั้งหมด (`globalSearchBar*.test.tsx`, `globalSearchBarHomeScreen.test.tsx`) ถึงผ่านอยู่แล้วทั้งที่มีบั๊กนี้จริง:** เพราะ RTL `fireEvent.press(...)` ยิง event ตรงไปที่ component เป้าหมายเลย ไม่ได้จำลอง native touch/gesture responder negotiation ระหว่าง ScrollView ที่ซ้อนกันจริง จึงไม่มีทางจับบั๊ก class นี้ได้ด้วย unit test แบบเดิม (ต้องทดสอบบนอุปกรณ์จริง/emulator เท่านั้น)
+
+**การแก้:** เพิ่ม `keyboardShouldPersistTaps="handled"` ให้ `<ScrollView>` หลักของ `HomeScreen.tsx` — ไฟล์: `src/screens/HomeScreen.tsx`
+
+### บั๊ก 2: หน้าจังหวัด (ProvinceDetailScreen) เลื่อนขึ้นลงไม่ได้
+
+**Root cause ที่ยืนยันแล้ว:** `ProvinceDetailScreen.tsx` เดิมไม่มี scroll container ห่อเนื้อหาเลย — เป็น `SafeAreaView` (flex:1) ที่มี header + `ProvinceMasterBadge` + `LandmarkList` (เป็น `View` ธรรมดาที่ render การ์ดตาม `.map()` ความสูงไม่จำกัด ไม่ใช่ `ScrollView`/`FlatList`) + ปุ่มเพิ่มบันทึก + `FlatList` ของ entries เรียงต่อกันเป็น sibling ทั้งหมดใน container ที่ไม่มี scroll เมื่อรวมความสูงทั้งหมด (โดยเฉพาะการ์ด landmark ที่อาจมีหลายสิบใบ) เกินจอ เนื้อหาจะถูกตัด/ล้นออกนอกจอโดยไม่มีทางเลื่อนดูได้เลย ตรงกับที่ผู้ใช้สงสัยว่า "น่าจะเป็นเพราะ layout" เป๊ะ
+
+**การแก้:** ห่อเนื้อหาทั้งหมด (ยกเว้น header ที่คงไว้ fixed ด้านบน) ด้วย `<ScrollView style={{flex:1}} keyboardShouldPersistTaps="handled">` ตัวเดียว, แปลง `FlatList` ของ entries (ท้ายสุด) เป็น `.map()` ธรรมดาแทน เพื่อไม่ให้เกิด "VirtualizedList ซ้อนใน ScrollView" (nested-list warning + gesture conflict แบบเดียวกับบั๊ก 1) — จำนวน entries ต่อจังหวัดมีจำกัด ไม่ใช่ list ยาวมากจึง render ตรงได้โดยไม่เสีย performance — ไฟล์: `src/screens/ProvinceDetailScreen.tsx`
+
+### ผลการรัน
+- `npx tsc --noEmit` — ผ่าน สะอาด
+- `npx jest src/__tests__/integration/provinceDetailScreen.test.tsx src/__tests__/integration/homeScreen.test.tsx src/__tests__/qa-round4/globalSearchBar` — **10/10 suites, 15/15 tests ผ่าน**
+- ไม่ได้รัน jest เต็มชุด (ตามคำสั่งผู้ใช้ ไม่จำเป็นสำหรับบั๊กเล็กจุดนี้ + เปลี่ยนแค่ 2 ไฟล์ screen ไม่กระทบ logic ไฟล์อื่น)
+
+### หมายเหตุ
+- ไม่แตะ `GlobalSearchBar.tsx`/`LandmarkList.tsx` ที่มีการแก้ไขค้างอยู่จาก session ก่อนหน้า (US-26/US-27) เลย — บั๊กทั้ง 2 อยู่ที่ layout ระดับ screen (`HomeScreen.tsx`, `ProvinceDetailScreen.tsx`) ไม่ใช่ตัว component เหล่านั้นเอง
+- ไม่มีจุดที่ต้องส่งกลับ PM — เป็นบั๊ก layout/gesture-handling ล้วนๆ แก้ได้ครบตาม scope ที่ระบุ
+
+---
+
+## รอบ 7: Bottom Tab Navigation & ข่าวท่องเที่ยว RSS (US-28–US-32, T90–T109)
+
+### T90 — Verify RSS endpoint จริง (ทำก่อนสุดตามที่ PM สั่ง)
+ยิง `curl` จริงไปที่ `https://www.tatnews.org/feed/` (ตัวเลือกแรกตามคำตัดสิน PM ข้อ 19) ก่อนเขียนโค้ดฝั่งข่าวใดๆ:
+- **HTTP 200**, `content-type: application/rss+xml; charset=UTF-8`, body เป็น RSS 2.0 XML ที่ถูกต้องจริง (มี `<channel>`, `<item>` หลายรายการ, `title`/`link`/`pubDate`/`description` ครบทุก field ที่ต้องการ) — `pubDate` เป็นรูปแบบ RFC 822 มาตรฐาน (`Sat, 12 Sep 2026 02:16:28 +0000`) ที่ `new Date(...)` parse ได้ตรงๆ
+- **ไม่ต้อง fallback ไป Bangkok Post/The Nation เลย** — endpoint แรกใช้งานได้จริง ตัดสินใจใช้ `https://www.tatnews.org/feed/` เป็นแหล่งเดียวตามลำดับ fallback ที่ PM กำหนด (ข้อ 1 ใช้ได้ จึงไม่ต้องลอง 2/3/4)
+- **ข้อสังเกต/caveat ที่พบ**: item ทุกรายการที่ตรวจสอบ (สุ่มดูหลายรายการ) **ไม่มี `<enclosure>`, `<media:content>`, หรือ `<img>` ในตัว description เลยสักรายการ** — เท่ากับว่าการ์ดข่าวเกือบทั้งหมด (อาจทั้งหมด) จะตกไปใช้ News Card Placeholder Cover เสมอในทางปฏิบัติ ไม่ใช่บั๊ก parser (ทดสอบ parser แยกแล้วว่าดึงรูปถูกต้องเมื่อมีจริงตาม priority enclosure→media:content→img ใน description) — เป็นข้อจำกัดของแหล่งข้อมูลเอง ไม่ใช่สิ่งที่แก้ได้ฝั่ง dev พีเอ็มอาจพิจารณาเพิ่มแหล่งอื่นเป็น fallback ถ้าต้องการให้การ์ดมีรูปจริงมากขึ้นในอนาคต แต่ไม่ใช่บั๊ก/ปัญหาที่ต้องแก้ในรอบนี้ (AC ของ US-29/US-32 ยอมรับ placeholder อยู่แล้ว)
+- TTL cache ตั้งตามคำตัดสิน PM ข้อ 19: **45 นาที** คงที่ (`NEWS_CACHE_TTL_MS` ใน `src/services/newsService.ts`)
+
+### T91 — Dependency ใหม่: ตรวจสอบ + ติดตั้งจริง
+- ยืนยันด้วย `npm view` ว่า `@react-navigation/bottom-tabs@^7.18.18` เข้ากันได้กับ `@react-navigation/native@^7.3.18` ที่มีอยู่แล้ว (peerDependency ตรงกันพอดี) และ `expo-web-browser@~57.0.3` ตรงกับ Expo SDK 57 (เวอร์ชันเดียวกับ `expo-image-picker`/`expo-haptics` ที่มีอยู่แล้ว)
+- ติดตั้งด้วย `npx expo install @react-navigation/bottom-tabs expo-web-browser` (ไม่ใช้ `npm install` ตรงๆ เพื่อให้ expo-cli เลือกเวอร์ชันที่ compatible กับ SDK ให้อัตโนมัติ) — expo-cli auto-เพิ่ม `"expo-web-browser"` เข้า `plugins` ใน `app.json` ให้เองด้วย (ไม่ต้องแก้มือ)
+- ตรวจสอบ `@expo/vector-icons`: **ไม่มีอยู่ใน `node_modules` เลย** (`require.resolve` throw) — ไม่ติดตั้งเพิ่ม เพราะ design-spec กำหนด emoji (`🗺️`/`📰`) เป็นดีฟอลต์ที่ใช้งานได้ทันทีอยู่แล้วโดยไม่ต้องพึ่ง icon library (ตรงตาม pattern เดิมของแอปทั้งหมดที่ใช้ emoji เป็นไอคอนเสมอ) — ถ้า PM/UIUX ต้องการ vector icon จริงในอนาคตต้องเพิ่ม dependency นี้และแก้ `TAB_ICON` ใน `AppNavigator.tsx`
+
+### T92–T96 — Navigation restructure (สายเสี่ยงสูงสุด)
+- `src/navigation/AppNavigator.tsx`: เปลี่ยนจาก native stack เดี่ยวเป็น `createBottomTabNavigator` 2 แท็บ (`MapTab`, `NewsTab`) แต่ละแท็บห่อ **nested native stack ของตัวเอง** (`MapStackNavigator` — Home/ProvinceDetail/AddEntry/Stats/Settings/Map2DValidation เหมือนเดิมทุกประการ, `NewsStackNavigator` — News/Stats/Settings ใหม่)
+- **การตัดสินใจสำคัญ (ลดความเสี่ยง regression)**: ใช้ **`RootStackParamList` ตัวเดียวกันตัวเดิม** (เพิ่มแค่ key `News`) เป็น generic type ให้ทั้ง `MapStack` และ `NewsStack` แทนที่จะแยก param list 2 ชุด — ผลคือ **ไม่ต้องแก้ prop type ของ `HomeScreen`/`ProvinceDetailScreen`/`AddEntryScreen`/`StatsScreen`/`SettingsScreen`/`Map2DValidationScreen` แม้แต่ไฟล์เดียว** (ยังคง `NativeStackScreenProps<RootStackParamList, 'X'>` เป๊ะเหมือนก่อนรอบนี้) ลด diff/ความเสี่ยงลงมาก
+  - **Trade-off ที่ยอมรับ (บันทึกไว้ให้ QA ทราบ)**: เพราะ `NewsStack` ใช้ type เดียวกับ `MapStack` เต็มๆ TypeScript จะไม่ฟ้องถ้าโค้ดใน `StatsScreen` เรียก `navigation.navigate('ProvinceDetail', ...)` หรือ `navigate('Home')` ขณะถูก mount อยู่ใน `NewsStack` (ซึ่งไม่ได้ register 2 route นี้จริง) — เคสนี้เกิดได้จริงถ้าผู้ใช้เปิดแท็บ "ข่าว" → กด "สถิติ" → กดแตะ entry ใน timeline (`StatsScreen` มี `onPress` ที่เรียก `navigate('ProvinceDetail', ...)`) ผลลัพธ์ตอนรันจริง: **ไม่ crash** — react-navigation แค่ log dev warning "The action 'NAVIGATE' ... was not handled by any navigator" แล้วไม่ทำอะไร (ปุ่มดูเหมือนกดไม่ติด) เพราะทั้ง `NewsStack` และ root `Tab.Navigator` ไม่มี route ชื่อ `ProvinceDetail` เลย — ไม่มี AC ไหนของ US-28 ครอบคลุมเคสนี้ตรงๆ (AC4 พูดถึงแค่ปุ่ม Stats/Settings เอง) จึงไม่ implement เพิ่มในรอบนี้ (จะทำให้ต้อง register ProvinceDetail/AddEntry/Home ซ้ำใน NewsStack ซึ่งขัดกับที่ T92 ระบุ scope ของ NewsStack ไว้ชัดว่ามีแค่ News+Stats+Settings) — **ถ้า PM ต้องการให้ทำงานถูกต้องเต็มรูปแบบ (deep-link ข้ามแท็บ) ต้องตัดสินใจเพิ่มเติมและอาจกระทบ design-spec**
+- `navigationRef` (ที่ `App.tsx`'s `AnonWarningGate` ใช้ `navigationRef.navigate('Settings')`) **ไม่ต้องแก้เลย** — ยืนยันแล้วว่า react-navigation แก้ `navigate(name)` แบบไม่ระบุ path เต็มด้วยการหา route ชื่อนั้นในต้นไม้ navigator ปัจจุบัน (นับทั้งแท็บที่ active อยู่) ให้อัตโนมัติ ทดสอบผ่านจริงใน `settingsScreen.test.tsx` เดิม (ยังผ่านหมดไม่ต้องแก้) + regression test ใหม่
+- แก้ test เดิม 1 ไฟล์ที่พังจากการ refactor โครงสร้าง (ไม่ใช่บั๊ก แค่ assertion ผูกกับโครงสร้างเดิม): `src/__tests__/integration/map2dValidationScreen.test.tsx` เช็ค `AppNavigator.toString()` ว่ามี `__DEV__` — หลัง refactor gating ย้ายไปอยู่ใน `MapStackNavigator` (ฟังก์ชันแยก ไม่ใช่ top-level `AppNavigator` อีกต่อไปเพราะตอนนี้ตัวนั้นคือ Tab Navigator) จึง export `MapStackNavigator` เพิ่มจาก `AppNavigator.tsx` (named export เสริม ไม่กระทบ default export/behavior เดิม) แล้วแก้ test ให้เช็ค `MapStackNavigator.toString()` แทน — พฤติกรรมจริง (Map2DValidation ยังเข้าถึงได้ใน dev, gate ด้วย `__DEV__` เหมือนเดิม) ไม่เปลี่ยนแปลง ยืนยันซ้ำด้วย regression test ใหม่ (`appNavigatorBottomTabs.test.tsx`)
+- Tab bar: emoji icon (🗺️/📰) + label ไทยตาม design-spec, สี active=`COLORS.accent`/bold, inactive=`COLORS.textSecondary`, haptic light เฉพาะตอนสลับไปแท็บใหม่ (เช็ค `navigation.isFocused()` ก่อน fire ทุกครั้งกันสั่นซ้ำตอนแตะแท็บเดิม), `tabBarAccessibilityLabel`/`accessibilityState` ตาม spec
+
+### T97–T100 — News data/logic layer
+- `src/services/newsRssParser.ts` (T98/T99): pure-function regex/string parser ตามคำตัดสิน PM ข้อ 21 (ไม่พึ่ง DOMParser/XML library) — รองรับ CDATA unwrap, HTML entity decode (numeric/hex/named ที่พบบ่อย), image priority `<enclosure>` → `<media:content>` → first `<img>` ใน description → `undefined`, `content:encoded` เป็น fallback ของ description, sort by `pubDate` desc + unparseable ไปท้ายสุดแบบ stable, dedupe by `link` (fallback `title`) เก็บรายการแรก
+- `src/services/newsService.ts` (T97/T100): `fetchNewsRssXml` แยก network/timeout/HTTP/invalid-XML error ออกจาก success ชัดเจน (throw `NewsFetchError`), AsyncStorage cache (`news_cache_v1`) + TTL 45 นาที, `isLikelyReachable` (T107 — ดูหัวข้อ In-App Browser ด้านล่าง)
+- ไม่มีจุดไหนใน T97-T100 ที่ทำไม่ได้ตาม spec — ครบทุก AC ของ US-29 AC1/AC5, US-32 AC3/AC5
+
+### T101–T104 — NewsScreen UI
+- `src/screens/NewsScreen.tsx`: stale-while-revalidate ตาม design-spec เป๊ะ — mount แสดง cache ทันที (ถ้ามี) ก่อนเสมอ, fetch สดในพื้นหลังเฉพาะตอนไม่มี cache/cache หมดอายุ (TTL), pull-to-refresh บังคับ fetch เสมอไม่สนใจ TTL, error state (T103) vs empty state (T103) แยกกันชัดเจนตาม `fetchError` flag ที่ set เฉพาะตอน fetch จริงล้มเหลว+ไม่มีอะไรให้โชว์ (รูปแบบเดียวกับ T87-T89/US-25 ที่มีอยู่แล้วใน `LandmarkList.tsx`)
+- คอมโพเนนต์ใหม่: `NewsCard.tsx` (T102, placeholder ใช้ `LinearGradient` โทนเขียวอ่อน + 📰 ตามสเปก), `NewsLoadingSkeleton.tsx` (T101, 5 แถว shimmer ขนาดจำลองการ์ดจริง), `NewsCacheIndicator.tsx` (T104), `NewsErrorState.tsx` (T103, reuse pattern จาก `LandmarkFetchErrorState` — โทนกลางไม่ใช่สีแดงตามที่ design-spec กำหนด)
+- แก้ `EmptyState.tsx` เพิ่ม optional prop `subtitle` (backward-compatible, caller เดิมทั้งหมดไม่ส่ง prop นี้จึงไม่กระทบ) เพื่อรองรับ "ยังไม่มีข่าวในขณะนี้" + "ลากลงเพื่อรีเฟรช" ตาม design-spec โดยไม่ต้องสร้าง component ใหม่ซ้ำซ้อน (T103 บอกให้ reuse `EmptyState.tsx` เดิม)
+- ไม่มี component ใหม่ชื่อ `Toast.tsx` มาก่อนในโปรเจกต์ — design-spec อ้างว่ามี "toast pattern อยู่แล้ว" แต่ตรวจโค้ดจริงแล้วพบว่า pattern เดิมที่ใกล้เคียงที่สุดคือ `Alert.alert(...)` ใน `AddEntryScreen.tsx` (native blocking dialog ไม่ใช่ transient toast) จึงต้องสร้าง `src/components/Toast.tsx` ใหม่ตั้งแต่ต้น (animated fade in/out ด้วย `react-native-reanimated`, auto-dismiss ตาม `duration` prop)
+
+### T105–T108 — In-App Browser
+- `src/screens/NewsScreen.tsx`: `handleOpenNews` เช็คลำดับ (1) link format ถูกต้องหรือไม่ (regex `^https?:\/\/`) → toast "ไม่สามารถเปิดข่าวนี้ได้" ถ้าไม่ผ่าน (2) `isLikelyReachable(link)` (T107) → toast "ต้องเชื่อมต่ออินเทอร์เน็ต..." ถ้าไม่ผ่าน (3) `WebBrowser.openBrowserAsync(link)`
+- **T107 opportunistic network check**: implement เป็น HEAD request จริงไปที่ **URL ข่าวเดียวกับที่กำลังจะเปิด** (ไม่ใช่ ping endpoint แยกที่ไม่เกี่ยวข้อง) ภายใน timeout 6 วินาที — throw/reject = "offline", ได้ response ใดๆ กลับมาแม้แต่ 404/500 = "online" (เพราะแปลว่าอุปกรณ์เชื่อมต่อเน็ตได้จริง ปัญหาถ้ามีคือฝั่ง URL เอง ซึ่งเป็นคนละเคสกับ US-31 AC4) ตรงตาม pattern "opportunistic" เดียวกับ `SyncContext.tsx`/T73 ที่ tasks.md อ้างอิง (ยิง request จริงแล้ว catch error แทนการพึ่ง `@react-native-community/netinfo` ซึ่งไม่มีติดตั้ง)
+- **T106/T107 toast duration**: ใช้ **4000ms** ตามคำตัดสิน PM ข้อ 23 (ปรับจาก ~2.5s ที่ design-spec เสนอไว้เดิม) — ทั้ง 2 ข้อความ (`link-invalid`, `offline`) เหมือนกัน
+- **T108**: ไม่ต้องเขียนโค้ดเพิ่มเพื่อรักษา scroll position — `openBrowserAsync` เป็น native modal overlay, `NewsScreen` ไม่ unmount ระหว่างเปิดอยู่ และไม่มี `useFocusEffect`/refetch-on-focus logic ใดๆ ที่จะ reset state เมื่อกลับมา (จงใจไม่ใส่ — fetch มีแค่ตอน mount/pull-to-refresh/retry เท่านั้น) จึงได้พฤติกรรมที่ต้องการโดยธรรมชาติ ยืนยันด้วยโค้ดรีวิว ไม่ได้เขียน automated test แยกสำหรับเคสนี้เพราะ RNTL/react-test-renderer จำลอง native modal overlay ของ `expo-web-browser` ไม่ได้จริง (เหมือนข้อจำกัดที่ `homeScreenScrollViewGuard.test.tsx` เคยบันทึกไว้เรื่อง native touch arbitration) — ต้อง manual QA บนอุปกรณ์จริงเพื่อยืนยันสุดท้าย
+
+### T109 — Edge case verification (US-32 ทั้ง 5 ข้อ)
+ครอบคลุมด้วย test แยกเคสชัดเจนไม่ปนกัน กระจายอยู่ 2 ระดับ:
+- `src/services/newsRssParser.test.ts`: (2) placeholder เมื่อไม่มีรูป (unit ระดับ parser), (3) dedupe by link/title, (5) missing/invalid pubDate ไปท้ายสุด
+- `src/__tests__/integration/newsScreen.test.tsx`: (1) feed ว่าง → Empty State ไม่ใช่ Error State, (2) placeholder cover จริงบนหน้าจอ (ไม่ใช่ broken image), (4) fetch ล้มเหลว+ไม่มี cache → Error State พร้อมปุ่มลองใหม่ที่ทำงานจริง
+
+### ผลการรัน
+- `npx tsc --noEmit` — ผ่าน สะอาด (ทั้งก่อน/หลังเพิ่มไฟล์ทั้งหมด)
+- `npx jest` เต็มชุด — **61/61 suites ผ่าน, 319 passed + 1 skip (เดิม)**, ไม่มี test เดิมพังแม้แต่ตัวเดียวนอกจาก 1 ไฟล์ที่ต้องอัป assertion ให้ตรงโครงสร้างใหม่ตามที่อธิบายไว้ข้างบน (ไม่ใช่ behavior regression)
+- Test ใหม่ที่เพิ่มในรอบนี้: `newsRssParser.test.ts` (27 cases รวม T111 CDATA/namespace/entity), `newsService.test.ts` (fetch/cache/reachability), `newsScreen.test.tsx` (10 integration cases ครอบ T101-T109), `appNavigatorBottomTabs.test.tsx` (6 regression cases ครอบ T95/T96)
+
+### จุดที่ทำไม่ได้ตาม spec 100% / ต้องการให้ PM ทราบ
+1. **Trade-off ของ shared param list** (อธิบายละเอียดในหัวข้อ T92-T96 ด้านบน) — `navigate('ProvinceDetail')`/`navigate('Home')` จาก `StatsScreen` ที่ถูกเปิดผ่านแท็บ "ข่าว" จะ no-op เงียบๆ (มี dev warning ใน console เท่านั้น ไม่ crash) แทนที่จะพาไปแท็บ "แผนที่" จริง — ไม่มี AC บังคับ ไม่ block การส่งงาน แต่ถ้า PM ต้องการ UX ที่สมบูรณ์กว่านี้ (เช่น deep-link ข้ามแท็บ) ต้องตัดสินใจเพิ่มเป็นงานแยก
+2. **T108 ไม่มี automated test** ตามเหตุผลข้อจำกัดของ RNTL ที่อธิบายไว้ (native modal overlay ของ `expo-web-browser` จำลองไม่ได้จริงในเครื่องมือนี้) — ต้อง manual QA บนอุปกรณ์จริง/emulator เพื่อยืนยันสุดท้ายตามที่ tasks.md ระบุไว้เอง
+3. **RSS feed ที่เลือก (`tatnews.org/feed/`) แทบไม่มีรูปในทุก item** (ดูหัวข้อ T90) — ไม่ใช่บั๊ก ไม่ผิด AC (placeholder เป็นพฤติกรรมที่ยอมรับได้ตาม US-32 AC2) แต่ผลลัพธ์ที่เห็นจริงคือการ์ดข่าวเกือบทั้งหมดจะเป็น placeholder ไม่ใช่รูปข่าวจริง — แจ้งไว้เผื่อ PM เห็นตอน QA แล้วสงสัยว่าเป็นบั๊ก
+
+---
+
+## รอบ 14: ยกระดับ Animation/Motion (US-34, T119-T122)
+
+> หมายเหตุกระบวนการ: เข้ามารับงานนี้พบว่า T118 (motion spec ของ UIUX, ต่อท้าย `docs/design-spec.md`) และการ implement จริงของ T119-T121 มีอยู่ในโค้ดครบถ้วนแล้วจาก session ก่อนหน้า (ยังไม่ commit, ตรงกับ `git status` ที่แสดงไฟล์เกี่ยวข้องเป็น modified) แต่ยังไม่มีการบันทึกไว้ใน `docs/dev-notes.md` และยังขาด unit test คู่กันบางจุด งานของรอบนี้คือ **ตรวจสอบความครบถ้วนของโค้ดที่มีอยู่เทียบกับ design-spec/tasks.md ทีละบรรทัด, เพิ่ม unit test ที่ยังขาด, รัน `tsc`/`jest` เต็มชุดยืนยัน, แล้วบันทึกผลตามที่ควรจะบันทึกไว้ตั้งแต่ต้น** ไม่ได้เขียนโค้ดฟีเจอร์ใหม่จากศูนย์ (ตรวจแล้วว่าตรงตาม spec ทุกค่าพารามิเตอร์ ไม่ต้องแก้ implementation ใดๆ)
+
+### T119 — Screen transition (`src/navigation/AppNavigator.tsx`)
+- ตรวจยืนยันตรงตาม docs/design-spec.md §1 ทุกค่า: ProvinceDetail push = `slide_from_right` / 280ms (§1.1), AddEntry push = `slide_from_bottom` / 300ms / `presentation: 'modal'` (§1.2), bottom-tab cross-fade ด้วย `react-native-reanimated` `withTiming(1, { duration: 180 })` ผ่าน `AnimatedTabScreen` wrapper ที่ trigger ด้วย `useIsFocused()` ทุกครั้งที่ focus เปลี่ยน (§1.3) — ไม่มีการเพิ่มไลบรารี animation ใหม่ตาม Out of Scope ของ US-34 (ใช้ native-stack `animation` prop ที่มีอยู่แล้ว + reanimated ที่มีอยู่แล้ว)
+- Reduce Motion ("หลักการร่วม"): `useReduceMotion()` hook กลาง (`src/hooks/useReduceMotion.ts`) ใช้ทั้งใน `MapStackNavigator` และ `AnimatedTabScreen` — เมื่อ true ทุก transition fallback เป็น cross-fade 120ms ล้วน (`REDUCE_MOTION_TRANSITION` / `withTiming(1, { duration: 120 })`) ตรงตามสเปก ไม่มี slide/scale เหลือ
+- Interrupt: native-stack รองรับ gesture-back/ปุ่มกดข้ามระหว่าง animation โดยธรรมชาติอยู่แล้ว (ไม่ต้องเขียนโค้ดเพิ่ม), tab cross-fade เป็น opacity-only ไม่ block touch และ re-trigger ทุกครั้งที่ focus เปลี่ยนแม้กดสลับถี่ๆ (`useEffect` ผูกกับ `isFocused`)
+- Test: `src/navigation/AppNavigator.test.tsx` (source-level guard ยืนยันค่า `animation`/`animationDuration`/`presentation`/reduce-motion fallback ตรงตาม design-spec เป๊ะ — เหตุผลที่ใช้ source-level แทน runtime assertion: native-stack's `animation` prop เป็น native OS-level transition ที่ RNTL จำลอง/ตรวจสอบด้วยสายตาไม่ได้จริงในเครื่องมือนี้ ตรงกับข้อจำกัดแบบเดียวกับที่ T108 เคยบันทึกไว้เรื่อง `expo-web-browser` modal), ครอบคลุมเพิ่มเติมด้วย `src/__tests__/integration/appNavigatorBottomTabs.test.tsx` และ `src/__tests__/qa-round8/appNavigatorRegressionDeep.test.tsx` (regression เดิม, ยังผ่านหมด)
+
+### T120 — Entrance animation (List/Card + Home 4th point ตามคำตัดสิน PM ข้อ 25)
+- ค่าพารามิเตอร์มาตรฐานตาม docs/design-spec.md §2 อยู่ใน `src/components/EntranceFadeItem.tsx` เพียงจุดเดียว (translateY เริ่ม 12pt, duration 260ms/item, `Easing.out(Easing.cubic)`, stagger `index * 40ms` cap ที่ 320ms, ไม่ใช้ `pointerEvents="none"` ระหว่างเล่นเพื่อไม่บล็อก touch) — ใช้ซ้ำ (reuse) เดียวกันทั้ง 3 จุดขั้นต่ำของ AC โดยไม่ duplicate ค่า
+- เล่นครั้งเดียวตอน initial render หลังข้อมูลโหลดเสร็จ ผ่าน hook กลาง `src/hooks/useEntrancePlayedOnce.ts` (ref-based flag, ไม่ re-arm แม้ data จะ toggle false→true อีกครั้ง กัน re-trigger ตอน re-render จาก state อื่นที่ไม่เกี่ยวกับการโหลดข้อมูลใหม่ตามสเปก)
+- 3 จุดขั้นต่ำของ AC ครบ: `LandmarkList.tsx` (§2.1, การ์ด hero index 0 + grid การ์ดที่เหลือ index 1..n), `NewsScreen.tsx` (§2.2, gate ด้วย metadata readiness `!loadingFirst && items.length > 0` โดยไม่รอ og:image ของ US-33 resolve ก่อนตามที่สเปกเตือนไว้ชัด), `StatsScreen.tsx` timeline (§2.3, T26)
+- จุดที่ 4 (คำตัดสิน PM ข้อ 25): HomeScreen 3D map — ใช้ hook แยกต่างหาก `src/hooks/useMountFadeIn.ts` (single-opacity mount fade, **ไม่มี stagger/translateY ไม่มี per-item logic เลย** ต่างจาก `EntranceFadeItem` โดยตั้งใจ เพราะจุดนี้ต้องเป็น single container fade เท่านั้นตามที่ PM ห้าม animate ทีละ tile เด็ดขาด) — apply แยกอิสระ 3 จุด: `Map3D.tsx` (grid container ทั้งก้อน 280ms), `HeaderProgress.tsx` (220ms), `Legend.tsx` (220ms) — ยืนยันด้วยโค้ดรีวิวว่า `ProvinceTile3D`/การ map แต่ละ tile ใน `Map3D.tsx` **ไม่มี** `useSharedValue`/`useAnimatedStyle`/`EntranceFadeItem` ใดๆ ต่อ tile เลย มีแค่ `Animated.View` ตัวเดียวที่ห่อทั้ง `Svg` ทั้งก้อน
+  - **Safety net ตามคำตัดสิน PM ข้อ 25 / tasks.md T120**: ข้อกำหนดบังคับให้ทดสอบบนอุปกรณ์จริงอย่างน้อย 1 เครื่องระดับกลาง/ล่างก่อนปิดงาน — **ไม่สามารถทำได้ในสภาพแวดล้อมนี้** (ไม่มี physical device/emulator ให้เข้าถึงจริง มีแค่ jest + `react-native-reanimated/mock` ซึ่งไม่จำลอง frame timing/GPU cost จริง) จึงไม่สามารถยืนยัน jank/perf บนอุปกรณ์จริงได้ตามที่ safety net กำหนด — **ไม่ fallback ไปทางเลือก A เอง** เพราะเหตุผล fallback ที่ tasks.md ระบุไว้คือ "พบ jank/หน่วงที่สังเกตได้จริง" ซึ่งยังไม่มีหลักฐานเชิงลบใดๆ (ทั้งทางทฤษฎีตามที่ design-spec วิเคราะห์ไว้แล้วว่า single-opacity animation ของ container เดียวมี performance risk ต่ำกว่า per-tile stagger มาก และไม่มี native rendering cost เพิ่มจากที่ `Map3D`/`ProvinceTile3D` มีอยู่แล้ว) — implementation คงไว้ตามทางเลือก B (grid + header/legend fade-in) ตามที่คำตัดสิน PM ข้อ 25 กำหนดเป็นค่าเริ่มต้น **แจ้ง QA/PM ให้ทดสอบบนอุปกรณ์จริงก่อนปิด sign-off ของ T120** ถ้าพบ jank จริงให้ fallback ตาม safety net ได้ทันทีโดยไม่ต้องขอ PM ตัดสินซ้ำ (คอมเมนต์ในโค้ด `Map3D.tsx` มีบันทึกข้อจำกัดนี้ไว้ตรงจุดแล้วเช่นกัน)
+- Test ที่มีอยู่แล้ว: `src/hooks/useEntrancePlayedOnce.test.ts` (unit, 4 cases: play-once, ไม่ re-arm, ฯลฯ)
+- Test ที่เพิ่มใหม่ในรอบนี้ (พบว่าขาด — T120/T123 ต้องพิสูจน์ว่า config ถูกเพิ่มจริงในแต่ละหน้าจอ ไม่ใช่แค่คงค่า default เดิม): `src/__tests__/motion/t120EntranceAnimationWiring.test.ts` — source-level guard (เหตุผลเดียวกับ AppNavigator.test.tsx: ค่า animation จริงที่ render ออกมาผ่าน `react-native-reanimated/mock` จะ resolve เป็นค่าสุดท้ายทันทีแบบ synchronous ไม่ทันสังเกตความต่างระหว่าง stagger/reduce-motion ได้จาก rendered style เพราะ mock's `withTiming`/`withDelay` คืนค่าปลายทางตรงๆ ไม่มี timer จริง — ตรวจสอบยืนยันพฤติกรรมนี้ด้วยการรัน probe script จริงก่อนตัดสินใจเลือกวิธี test) ครอบคลุม: ค่าพารามิเตอร์ใน `EntranceFadeItem.tsx`, การ wire เข้า `LandmarkList.tsx`/`NewsScreen.tsx`/`StatsScreen.tsx`, การ wire `useMountFadeIn` เข้า `Map3D.tsx`/`Legend.tsx`/`HeaderProgress.tsx`, และ **regression guard ที่ยืนยันว่า `Map3D.tsx` ไม่มี `EntranceFadeItem`/per-tile animated value ใดๆ เลย** (กัน regression ในอนาคตที่อาจมีคนเผลอเพิ่ม per-tile animation ซึ่งขัดกับคำตัดสิน PM ข้อ 25 โดยตรง)
+
+### T121 — Press feedback ที่ชัดเจนขึ้น (Enhanced PressableScale)
+- `src/components/PressableScale.tsx`: เพิ่ม prop ใหม่ `variant?: 'default' | 'emphasized'` (default = `'default'`, ตรงตามที่ design-spec §3 กำหนดไว้ให้เป็น purely-additive opt-in ไม่กระทบ caller เดิม) — ตรวจนับแล้วว่า caller อื่นทั้งหมดในโปรเจกต์ที่ไม่ได้อยู่ใน scope ของ US-34 (เช่นปุ่มรองใน Settings, `EmailLinkForm`, ปุ่ม view-mode-toggle/category-chip ใน `LandmarkList.tsx`, ปุ่ม stats/settings ใน `HomeScreen.tsx`/`NewsScreen.tsx`) **ไม่ได้ระบุ `variant`** จึงยังคง behavior เดิม 100% (scale 0.96, ไม่มี shadow-depress) — ไม่ขยาย scope เกินที่ requirement ขอ
+- ค่าตาม docs/design-spec.md §3.1 ตรงเป๊ะ: `variant="emphasized"` → scale 0.93 (จาก 0.96 เดิม), shadow-depress effect (`shadowOpacity` 0.08→0.03, `shadowRadius` 14→6, offset y 6→2) ผูก spring เดียวกับ scale (`damping: 12, stiffness: 150`) ให้ sync กันสนิท, **เฉพาะ iOS เท่านั้น** (Android fallback เป็น scale-only ตามที่สเปกเตือนเรื่อง elevation ไม่ smooth-interpolate) — เช็คด้วย `Platform.OS === 'ios'` ที่ตัวแปร `emphasizedShadow`
+- 4 จุดที่ apply `variant="emphasized"` ตรงตาม §3.2 ครบทั้ง 4 จุดไม่ขาดไม่เกิน (ตรวจด้วย `grep` ทั้งโปรเจกต์): ปุ่มเช็คอินใน `LandmarkCard.tsx`, การ์ด Landmark ทั้งใบใน `LandmarkCard.tsx` (ทั้ง hero/compact variant ผ่าน `PressableScale` ตัวนอกสุดของการ์ด), การ์ดข่าวใน `NewsCard.tsx`, ปุ่ม "+ เพิ่มบันทึกใหม่" ใน `ProvinceDetailScreen.tsx`
+- haptic คงเดิมทุกจุด (ไม่เปลี่ยนความถี่/timing ตามที่สเปกระบุว่า AC ไม่ได้ขอเปลี่ยนจุดนี้)
+- Reduce Motion: `variant="emphasized"` ภายใต้ reduce-motion fallback กลับไปเป็น scale-only 0.96 เหมือน `default` เป๊ะ ไม่มี shadow-depress เลย (`emphasized = variant === 'emphasized' && !reduceMotion`)
+- Test: `src/components/PressableScale.test.tsx` (มีอยู่แล้ว, 6 cases ครอบ backward-compat/iOS-emphasized/Android-fallback/reduce-motion/no-crash) — เพิ่มใหม่ในรอบนี้: `src/hooks/useReduceMotion.test.ts` (unit test ของ implementation จริง ไม่ใช่ mock — เดิมมีแต่ที่ mock hook นี้ทิ้งใน `PressableScale.test.tsx`/`AppNavigator.test.tsx`, ยังไม่มี test ของพฤติกรรมจริงของตัว hook เอง: default false ก่อน resolve, flip ตามค่า `AccessibilityInfo.isReduceMotionEnabled()`, sync กับ `reduceMotionChanged` event แบบ live, ไม่ throw แม้ promise reject, cleanup subscription ตอน unmount) — พบและแก้ปัญหาการเขียน test เอง 2 จุดระหว่างพัฒนา: (1) `@testing-library/react-native` เวอร์ชันนี้ `renderHook` เป็น async ต้อง `await` เสมอ (2) การ trigger state update จาก event handler ที่ capture ไว้นอก React ต้องห่อด้วย `await act(async () => {...})` ไม่ใช่ `act(() => {...})` เฉยๆ ไม่งั้น state update ไม่ flush ให้ assertion เห็นทัน — ตรวจสอบด้วยการรัน debug script จริงยืนยันสาเหตุก่อนแก้
+
+### T122 — Regression guard
+- รัน `npx jest` เต็มชุด (71 test suites เดิม + 2 ไฟล์ใหม่ = 71 suites) ทั้งหมด **ผ่าน 100%**: **387 passed, 1 skipped (เดิม), 0 failed** — ไม่มี test เดิมของ US-1 ถึง US-32 พังแม้แต่ตัวเดียวจากการเปลี่ยนแปลงทั้งหมดของ T119-T121 (ข้อมูลที่แสดง/ผลการนำทาง/ผลการกดปุ่มเดิมยังเหมือนเดิมทุกประการ ตามที่ AC บังคับ)
+- `npx tsc --noEmit` ผ่านสะอาด ไม่มี type error หลงเหลือ (รวมไฟล์ test ใหม่ 2 ไฟล์ที่เพิ่งเขียนในรอบนี้ — ต้องแก้ type ของ mock `AccessibilityInfo.addEventListener` 2 รอบก่อนผ่าน เพราะ overload ของ RN's type จริงเข้มงวดกว่าที่คาด)
+- Interrupt/ไม่บังคับรอ animation: ยืนยันด้วยโค้ดรีวิว — native-stack transition รองรับ gesture-back/กดปุ่มข้ามระหว่าง animation โดยธรรมชาติ (ไม่มีโค้ดใดๆ ที่ disable ปุ่ม/gesture ระหว่าง `animating` state), tab cross-fade เป็น opacity-only ที่ re-trigger ได้ทันทีทุกครั้งที่ focus เปลี่ยนแม้กดถี่ (ไม่มี debounce/lock), `EntranceFadeItem`/`useMountFadeIn` ไม่เคยใช้ `pointerEvents="none"` เลย (ตรวจสอบเป็นส่วนหนึ่งของ `t120EntranceAnimationWiring.test.ts`), `PressableScale`'s `withSpring` รองรับ re-trigger ระหว่าง settling โดยธรรมชาติของ reanimated เอง (ไม่ต้องเขียนโค้ดเพิ่ม)
+- ไม่มีจุดไหนที่พบว่า functional behavior เปลี่ยนไปจากเดิม
+
+### ผลการรันรวมของรอบ 14
+- `npx tsc --noEmit` — ผ่านสะอาด
+- `npx jest` เต็มชุด — **71/71 suites ผ่าน, 387 passed + 1 skip, 0 failed**
+- Test ใหม่ที่เพิ่มในรอบนี้: `src/hooks/useReduceMotion.test.ts` (6 cases), `src/__tests__/motion/t120EntranceAnimationWiring.test.ts` (16 cases source-level wiring guard)
+
+### จุดที่ทำไม่ได้ตาม spec 100% / ต้องการให้ PM ทราบ
+1. **T120 safety net (on-device perf test ของ Home 3D map grid fade-in) ยังไม่ได้ทำจริง** — ไม่มี physical device/emulator ในสภาพแวดล้อมนี้ให้ทดสอบตามที่ tasks.md/คำตัดสิน PM ข้อ 25 บังคับไว้ก่อนปิดงาน T120 อย่างสมบูรณ์ คงค่า implementation ไว้ตามทางเลือก B (ค่าเริ่มต้นที่ PM กำหนด) โดยไม่ fallback เองเพราะยังไม่มีหลักฐานเชิงลบใดๆ — **ต้องการให้ QA/ผู้ใช้ทดสอบบนอุปกรณ์จริงอย่างน้อย 1 เครื่องระดับกลาง/ล่างก่อน sign-off** ถ้าพบ jank ให้แจ้งกลับมาเพื่อ fallback เป็นทางเลือก A ได้ทันที (ไม่ต้องขอ PM ตัดสินซ้ำตามที่ tasks.md อนุญาตไว้แล้ว)
+2. ไม่มีจุดอื่นที่ scope ถูกตัดทอนหรือเบี่ยงเบนจาก AC ของ US-34 — T119/T121/T122 ครบตามสเปกทุกค่าพารามิเตอร์ ยืนยันด้วยทั้งโค้ดรีวิวและ test ที่เพิ่มใหม่
+
+---
+
+## ประวัติการแก้บั๊ก — US-34 Animation/Motion Upgrade (แก้หลัง QA ตีกลับ)
+
+### รอบ 2 (qa-result.md รอบ 9, บั๊ก 1 / AC2 — ส่งกลับโดย QA, root cause = โค้ด)
+
+**บั๊กที่แก้**: entrance animation ของ list หลัก (`LandmarkList.tsx`, `NewsScreen.tsx`, และมีความเสี่ยงเดียวกันแฝงอยู่ใน `StatsScreen.tsx` แม้ AC2 ของจุดนั้นจะยังผ่านอยู่ตาม tester) ถูกตัดจบก่อนผู้ใช้จะทันเห็นจริง เพราะ re-render ที่ไม่เกี่ยวข้องเกิดขึ้นเกือบทันทีหลัง mount
+
+**Root cause ที่แท้จริง** (ยืนยันด้วย isolated repro ของ tester ใน `src/__tests__/qa-round-us34/entranceAnimationRealRender.test.tsx` และตรวจสอบซ้ำด้วย debug instrumentation ของตัวเอง): `src/hooks/useEntrancePlayedOnce.ts` เดิมคำนวณค่า return จาก "render pass นี้เป็นครั้งแรกที่ `hasData` เป็น true หรือไม่" — คำนวณผ่าน `useRef` ที่ถูก flip เป็น `true` ภายใน `useEffect` หลัง commit ครั้งแรก ผลคือ **re-render ครั้งถัดไปใดๆ ก็ตาม** (ไม่ว่าจะเกี่ยวกับ list หรือไม่) จะเห็น ref เป็น `true` แล้วและ return `false` ทันที — ทำให้ `LandmarkList`/`NewsScreen` ที่เขียนแบบ `shouldPlayEntrance ? <EntranceFadeItem>...</EntranceFadeItem> : <PlainItem>` เปลี่ยน component type กลางคัน (React unmount ของเก่า + mount ของใหม่ ไม่ใช่แค่ prop update) ตัด `EntranceFadeItem` ทิ้งก่อนที่ animation (260-580ms รวม stagger) จะมีโอกาสเล่นจบเลย — สาเหตุจริงคือ effect ที่มีอยู่แล้วก่อนหน้า US-34 (`LandmarkList`'s `setLandmarks(getLandmarksForProvince(id))` ที่ `.filter()` ใน `src/data/thailand-landmarks.ts:1283-1285` คืน array reference ใหม่เสมอ + `setIsFetchingWiki(true)`; `NewsScreen`'s `writeNewsCache` → `setCacheTimestamp`) ทำให้เกิด re-render แทรกทันทีหลังเฟรมแรกที่ข้อมูลพร้อม
+
+**การแก้ไข**: เขียน `useEntrancePlayedOnce` ใหม่ทั้งหมด (ไฟล์เดียว, **ไม่เปลี่ยน API เดิม** — ยังรับ `hasData: boolean` คืน `boolean` เหมือนเดิมทุกประการ จึงไม่กระทบ caller เดิมของ `StatsScreen`/`HomeScreen` ที่ AC2 ผ่านอยู่แล้ว):
+- ตัดสินใจ arm/disarm จาก **การเปลี่ยนค่าจริงของ `hasData` เอง** (`false → true` = arm, `true → false` = disarm) ไม่ใช่จาก "มี re-render เกิดขึ้นหรือยัง"
+- คำนวณแบบ synchronous ระหว่าง render (เทียบ `hasData` ปัจจุบันกับ ref ที่เก็บค่าก่อนหน้า) ไม่ใช้ `useEffect` เลย — จึงยังคง property เดิมที่เฟรมแรกที่ข้อมูลพร้อมก็ render entrance-wrapped ได้ทันที (ไม่ delay ไปอีก 1 เฟรมเหมือนถ้าใช้ effect-only)
+- เมื่อ armed แล้ว จะ**คงค่า `true` ต่อเนื่องข้าม re-render ใดๆ** ตราบใดที่ `hasData` ยังเป็น `true` อยู่ (ไม่สนใจว่า re-render นั้นมาจากอะไร) — ทำให้ `EntranceFadeItem` ไม่ถูกสลับออกกลางคันอีกต่อไป (type เดิม + key เดิม → React ไม่ unmount/remount, animation ที่กำลังเล่นอยู่เล่นต่อจนจบตามปกติของ reanimated เอง ซึ่งไม่ผูกกับ parent re-render อยู่แล้วเพราะ `EntranceFadeItem`'s effect มี deps แค่ `[reduceMotion, index]`)
+- reset กลับเป็น `false` เฉพาะตอน `hasData` กลับไปเป็น `false` จริง (เช่น สลับไปจังหวัด/feed ที่ยังไม่มีข้อมูล) เพื่อให้ "epoch" ข้อมูลใหม่ในอนาคตยัง arm ใหม่ได้ตามปกติ
+
+**ไฟล์ที่แก้**:
+- `src/hooks/useEntrancePlayedOnce.ts` — เขียน logic ใหม่ตามข้างบน (ลบ `useEffect`, เหลือแค่ 2 `useRef` เทียบกันระหว่าง render)
+- `src/hooks/useEntrancePlayedOnce.test.ts` — อัปเดต unit test ให้ตรงกับ contract ใหม่ (เดิม test เขียนไว้ตรงกับ behavior เก่าที่เป็นตัวบั๊กเอง เช่น "returns false on every subsequent re-render, even while hasData stays true" — คือนิยามของบั๊กที่ QA รายงาน จึงต้องแก้ assertion ไม่ใช่แค่โค้ด)
+- `LandmarkList.tsx` และ `NewsScreen.tsx` — **ไม่ต้องแก้เลย** เพราะ root cause อยู่ที่ hook กลางล้วนๆ (แก้จุดเดียว ผลลัพธ์แก้ทั้ง `LandmarkList`/`NewsScreen`/`StatsScreen` ที่ใช้ hook เดียวกันพร้อมกัน)
+- `src/__tests__/qa-round-us34/entranceAnimationRealRender.test.tsx` (ไฟล์ของ tester) — อัปเดต assertion ของ 2 เคสที่เดิมยืนยันพฤติกรรม "บั๊ก" (`toBe(0)`) ให้ยืนยันพฤติกรรมที่ถูกต้องหลังแก้ (`toBe(2)`/`toBe(4)`) พร้อมเปลี่ยนชื่อ/คอมเมนต์จาก "BUG repro"/"already gone" เป็น "regression guard (bug-fix round 2)"/"SURVIVES" — และ**เพิ่มเคสใหม่** "NewsScreen rendered in ISOLATION" (คู่กับที่มีอยู่แล้วของ StatsScreen) เพื่อพิสูจน์ตรงๆ ว่า fix ใช้ได้กับ NewsScreen จริง ไม่ใช่แค่ LandmarkList
+
+**สิ่งที่ตรวจพบเพิ่มระหว่างแก้ (ไม่ใช่บั๊กใหม่ — เป็นข้อจำกัดของวิธีนับ instance ในเครื่องมือทดสอบ)**: หลังแก้แล้ว เคส "NewsScreen ผ่าน `NavigationContainer`/`Stack.Navigator` จริง" และ "StatsScreen ผ่าน `NavigationContainer`/`Stack.Navigator` จริง" ยังคง report `countEntranceFadeItems() === 0` (เหมือนเดิม) — ตรวจสอบด้วย debug instrumentation ตรงๆ (log `hasData`/`armed` ทุก render + เดิน fiber tree แบบเต็มด้วยสคริปต์แยก) แล้วยืนยันว่า **ไม่ใช่บั๊กที่หลงเหลือ**: `armed` กลายเป็น `true` และไม่กลับเป็น `false` อีกเลยตลอดการทดสอบ (แค่ 2 ครั้งของการ render hook: false ตอน mount แรก แล้ว true ตอน data พร้อม ไม่มีครั้งที่ 3) แต่การเดิน fiber tree ด้วย `.child`/`.sibling` ผ่าน `TestInstance.unstable_fiber` ไปไม่ถึงชั้นเนื้อหาจริงของหน้าจอเมื่อ component ถูก mount ผ่าน `NativeStackNavigator`'s `Screen`/`DelayedFreeze`/`Freeze`/`Suspender` wrapper (ยืนยันด้วยการ dump ชื่อ type ของทุก fiber ในทรีจริง — เดินไปสุดที่ `RCTSafeAreaView` แล้วหยุด ทั้งที่เนื้อหาจริงข้างในมีอยู่และ query ด้วย `getByText` เจอปกติ) — เพิ่มเคส "NewsScreen ISOLATION" (ไม่ผ่าน navigator) เพื่อพิสูจน์แยกส่วนว่า fix ทำงานถูกต้องจริง (`count = 2`) ตรงกับที่ StatsScreen ISOLATION เคยพิสูจน์ไว้แล้วสำหรับตัวเอง — อัปเดตคอมเมนต์ในทั้ง 2 เคส navigator-wrapped ให้ระบุสาเหตุที่ถูกต้อง (ข้อจำกัดเครื่องมือทดสอบ ไม่ใช่บั๊ก) แทนคอมเมนต์เดิมที่บอกว่า "net effect on end users is the same as the bug" ซึ่งไม่ถูกต้องอีกต่อไปหลังแก้
+
+**ไม่ได้แตะ**: บั๊กที่ 2 ของ qa-result.md รอบ 9 (ปุ่ม "+ เพิ่มบันทึกใหม่" ใน `EmptyState.tsx` ไม่ได้ `variant="emphasized"`) — QA ส่งกลับให้ PM ตัดสินใจ scope ก่อน ไม่ใช่งานของรอบนี้
+
+### ผลการรันของรอบ 2
+- `npx tsc --noEmit` — ผ่านสะอาด ไม่มี type error
+- `npx jest` เต็มชุด — **75/75 suites ผ่าน, 419 passed + 1 skip (เดิม, ไม่เกี่ยวข้อง), 0 failed** — ไม่มี regression ต่อ US-1–US-32 หรือ US-33 เดิมแม้แต่รายการเดียว
+- `src/__tests__/qa-round-us34/entranceAnimationRealRender.test.tsx` (ไฟล์ของ tester ที่อ้างถึงในบั๊กรายงาน) — **ผ่านทั้ง 9/9 เคสจริง** (เดิม 8 เคส + เพิ่ม 1 เคสใหม่ตามข้างบน) รวมเคส regression guard ที่พิสูจน์ตรงๆ ว่า `EntranceFadeItem` ไม่ถูกตัดทิ้งกลางคันจาก re-render ที่ไม่เกี่ยวข้องอีกต่อไป
+- `src/hooks/useEntrancePlayedOnce.test.ts` — ผ่านทั้ง 4/4 เคส (อัปเดต contract ตามข้างบน)
+
+## รอบ 15: Color Palette & Layout Redesign เฟส 1 — T126-T131 (US-35 + US-36 HomeScreen)
+
+### บริบท
+T124/T125 (UIUX เสนอตัวเลือก + Decision Gate) ปิดแล้วก่อนหน้านี้ — ผู้ใช้ยืนยันเลือก **ตัวเลือก A "Deep Jade"** และ `mapCanvasBg` **ทางเลือก B (tint อ่อน ไม่ใช่พื้นเข้ม)** ตาม `docs/tasks.md` "T125 — ผลตัดสินใจ" งานรอบนี้คือ implement T126-T131 ตาม `docs/design-spec.md` "ส่วนเพิ่มเติม: Color Palette & Layout Redesign (รอบ 15)"
+
+### T126 — `src/theme.ts` (จุดเดียวที่แก้สี)
+อัปเดต `COLORS` ทั้งหมดตามตาราง Deep Jade (unlockedTop/accent → `#15A87A`, unlockedSide/accentDark → `#0B5C46`, lockedTop → `#CBD3CF`, lockedTopLoading → `#E3E8E5`, background → `#F6F9F7`, textPrimary → `#122019`, textSecondary → `#5B6B63`, trackBg → `#DCE4E0`, gold → `#D8A93B`, danger/amber/amberBg คงเดิม) และเพิ่ม utility token ใหม่ 9 ตัวที่ 6 ไฟล์ของ T127-T129 ต้องใช้แทนการ hardcode: `surface`, `accentSurface`, `mapCanvasBg`, `mapAmbientShadow`, `tooltipBg`, `textOnDark`, `border`, `borderLight`, `muted` — ไม่แตะ `CATEGORY_COLORS` (สีหมวดหมู่ landmark ไม่เกี่ยวกับ brand token ของรอบนี้ "เท่าที่จำเป็น" ตามที่ task ระบุ) และไม่แตะ `SHADOWS` (shadowColor `#0F2A1D` เดิมเข้ากับโทน Deep Jade อยู่แล้ว)
+
+**ตรวจ WCAG AA ด้วยมือ (relative luminance formula ตรงๆ ไม่มีเครื่องมือ)**:
+- `textPrimary` (#122019) on `background` (#F6F9F7): contrast ≈ **15.9:1** ผ่านสบาย
+- `textSecondary` (#5B6B63) on `background`: contrast ≈ **5.31:1** ผ่าน AA (>4.5)
+- `accentDark` (#0B5C46, ใช้เป็น hint text) on `accentSurface` (#E3F5EF): contrast ≈ **7.05:1** ผ่านสบาย
+- `textOnDark` (#FFFFFF) on `tooltipBg` (`rgba(18,32,25,0.88)`) คอมโพสิตทับพื้นหลังที่สว่างที่สุดที่เป็นไปได้ (`mapCanvasBg` ขาว): contrast ≈ **11.7:1** ผ่านสบาย (คอมโพสิตทับ tile สีเขียว/ทองจะยิ่งเข้มกว่านี้ = contrast ยิ่งสูงกว่านี้)
+- `danger`/`amber`/`amberBg` คงค่าเดิมตามที่ design-spec ระบุว่าผ่าน AA อยู่แล้ว — ไม่คำนวณซ้ำ
+
+**`mapCanvasBg` ที่เลือกใช้จริง**: `#FFFFFF` (เท่ากับ `surface`) — ใช้ทางเลือก "สีขาวล้วนตัดกับพื้นหลังอมมินท์อ่อนๆ" ที่ orchestrator อนุญาตไว้ในตัวเลือก B แทนที่จะคำนวณ tint ใหม่ เพราะ `background` (#F6F9F7) กับ `#FFFFFF` ต่างกันเพียงเล็กน้อยพอที่จะให้ความรู้สึก "ลอยอยู่ในกล่องกระจก" แบบนุ่มนวล โดยไม่ต้องเดา tint ตัวเลขใหม่ที่ไม่มีอ้างอิงจาก UIUX
+
+### T127 — `src/screens/HomeScreen.tsx`
+- ปุ่มตั้งค่า (`settingsButton`) ห่อด้วยพื้นผิวกลม (`RADIUS.full`, `COLORS.trackBg`) ตาม spec ตรงตัว — ยังคง 44×44pt + `PressableScale` haptic/scale เดิมทุกประการ
+- `topBar` เพิ่ม `paddingTop` จาก `SPACING.xs` เป็น `SPACING.sm`
+- spacing ระหว่าง section ทั้งหมด (topBar → search card → header progress card → map hero card → legend) รวมเป็น `SPACING.lg` สม่ำเสมอ โดยใช้ pattern **"marginBottom เดียวต่อ section"** (แต่ละ section ใส่แค่ `marginBottom: SPACING.lg` ของตัวเอง ไม่ใส่ `marginTop` ซ้ำ) เพื่อไม่ให้เกิด gap ซ้อนสองเท่าเวลา hint banner แสดง/ไม่แสดงสลับกัน
+- `hintBanner` เปลี่ยนพื้นหลัง hardcode `#EAF7F1` → `COLORS.accentSurface`
+
+### T128 — `src/components/Map3D.tsx` + `src/components/ProvinceTile3D.tsx`
+- **ข้อจำกัดสำคัญที่ยึดตาม**: `src/__tests__/motion/t120EntranceAnimationWiring.test.ts` มี regex ยืนยันบรรทัด `<Animated.View style={[styles.wrapper, fadeInStyle]}>` ตรงตัวเป๊ะ — จึงใส่ hero-canvas styling (มุมโค้ง/เงา/พื้นหลัง/padding) ทั้งหมดเข้าไปใน **เนื้อหาของ `styles.wrapper`** แทนที่จะเปลี่ยนโครงสร้าง JSX บรรทัดนั้น
+- `styles.wrapper`: เพิ่ม `marginHorizontal: SPACING.md`, `marginBottom: SPACING.lg`, `paddingVertical/paddingHorizontal: SPACING.lg`, `borderRadius: RADIUS.xl`, `backgroundColor: COLORS.mapCanvasBg`, `...SHADOWS.lg`
+- เพิ่ม `SIDE_MARGIN` คำนวณจาก `CARD_MARGIN_H + CARD_PADDING_H` (แทนเลข magic 16 เดิม) ให้การคำนวณ `scaledWidth`/`scaledHeight` ของ SVG อ้างอิงพื้นที่ที่เหลือจริงหลังหักการ์ด ไม่ให้แผนที่ overflow ออกนอกการ์ดใหม่
+- เพิ่ม ambient ground-shadow `<Ellipse>` วาดก่อน `PROVINCES.map(...)` (paint order = อยู่หลังสุด/ล่างสุด) ใช้ `COLORS.mapAmbientShadow` — ไม่แตะ geometry/จำนวน/มุมกล้องของ tile ใดๆ ตามคำตัดสิน PM ข้อ 26
+- ย้าย tooltip hardcode `rgba(26,26,26,0.88)` → `COLORS.tooltipBg` และตัวหนังสือ `#FFFFFF` → `COLORS.textOnDark`
+- `ProvinceTile3D.tsx`: จุดเดียวที่มี hex hardcode เดิมคือ stroke ขอบบนของ non-master tile (`'#FFFFFF'`) → เปลี่ยนเป็น `COLORS.textOnDark` — สีอื่นทั้งหมด (`unlockedTop`/`unlockedSide`/`lockedTop`/`gold`) รับค่าใหม่จาก `theme.ts` อัตโนมัติโดยไม่ต้องแก้โค้ดจุดนี้เลย — **ไม่แตะ `interpolateColor`/`useSharedValue`/`withSpring`/`useEffect` ใดๆ ทั้งสิ้น**
+- glossy top-edge highlight (ระบุใน spec ว่า "optional, ไม่บังคับ") — **ไม่ทำในรอบนี้** เพื่อลดความเสี่ยงต่อ tile ที่มี animation ผูกอยู่ ไม่ใช่ปัญหาที่ต้องส่งกลับ PM เพราะ spec เขียนไว้ชัดว่า optional
+
+### T129 — `HeaderProgress.tsx`, `Legend.tsx`, `GlobalSearchBar.tsx`
+- **HeaderProgress**: การ์ดเปลี่ยนจาก `#FFFFFF`/`RADIUS.lg`/`SHADOWS.sm` → `COLORS.accentSurface`/`RADIUS.xl`/`SHADOWS.md` (hero stat bento); progress fill เปลี่ยนจากสีเดียว (`COLORS.accent`) เป็น `LinearGradient` สองโทน (`accent` → `accentDark`) วางเป็น child ของ `Animated.View` เดิม (ไม่แตะ `fillStyle`/`useAnimatedStyle`/`withTiming` ที่ควบคุม width); track สูงขึ้นจาก 8→10; skeleton (`ShimmerBlock`) override `backgroundColor` เป็น `COLORS.lockedTopLoading` ผ่าน `style` prop (ไม่แก้ `ShimmerBlock.tsx` เอง เพราะไม่อยู่ใน scope 6 ไฟล์ และ prop `style` ของมันออกแบบมาให้ override ได้อยู่แล้ว)
+  - **ตัวเลข hero stat**: ทำเป็น nested `<Text>` ขนาดใหญ่/หนากว่า (`labelCount`, fontSize 22/800) อยู่ **ภายใน `<Text>` เดียวกัน** กับ prefix "ปลดล็อกแล้ว"/suffix "จังหวัด" (ไม่ใช่คนละบรรทัด) — เหตุผล: `src/__tests__/integration/homeScreen.test.tsx` และ `entranceAnimationRealRender.test.tsx` เรียก `getByText('ปลดล็อกแล้ว {n} / 76 จังหวัด')` เป็น string เดียวเป๊ะ ตรวจสอบ implementation ของ RNTL (`node_modules/@testing-library/react-native/dist/helpers/text-content.js`) แล้วยืนยันว่ามันจะ concat ข้อความของ nested `<Text>` ทั้งหมดเข้าด้วยกันเป็น string เดียวเพื่อ match ได้จริง ถ้าอยู่ในบรรทัดเดียวกัน (ไม่มี `\n` คั่น) — จึงเลือกให้ hierarchy เกิดจาก **ขนาดตัวอักษรต่างกันในบรรทัดเดียว** แทนการขึ้นบรรทัดใหม่ (ซึ่งจะเปลี่ยน string ที่ query และทำให้ test เดิมพังจริง) ยังคงสื่อ "ตัวเลขเป็นจุดเด่น" ตาม spec ได้โดยไม่พัง a11y/regression contract เดิม
+- **Legend**: chip เปลี่ยนจาก `borderWidth:1`/`borderColor:'#EDEDED'` → พื้นผิวทึบ (`COLORS.surface`) + `...SHADOWS.sm` ตรงตาม spec
+- **GlobalSearchBar**: `container` shadow ยกจาก `SHADOWS.sm` → `SHADOWS.md`, `containerFocused` เปลี่ยนจาก manual `shadowOpacity: 0.12` → `...SHADOWS.lg` ตรงตาม spec ("focused ... ด้วย SHADOWS.lg"); เก็บ hex เดิมทั้งหมด (`#FFFFFF`, `#E8ECE9`, `#8C9B95`, `#999`, `#F0F3F1`, `#BBB`) มาอ้าง token ใหม่ (`surface`/`border`/`muted`/`borderLight`) — สีเทาที่ใกล้เคียงกันหลายเฉด (`#999`/`#BBB`/`#8C9B95`) รวมเป็น `COLORS.muted` ตัวเดียวเพื่อลด fragmentation (การเปลี่ยนแปลงภาพเล็กน้อย ไม่กระทบ contrast/functionality); `wrapper` marginBottom เปลี่ยนจาก `SPACING.xs` → `SPACING.lg` ตาม spacing pattern ของ T127
+
+### T130 — Regression guard
+รัน `npx tsc --noEmit` ผ่านสะอาด และ `npx jest` เต็มชุด **81/81 suites ผ่าน, 435 passed + 1 skip (เดิม ไม่เกี่ยวข้อง), 0 failed** — ครอบคลุม US-1, US-2, US-3, US-14, US-24, US-26, US-34 (`t120EntranceAnimationWiring.test.ts`, `entranceAnimationRealRender.test.tsx`, `reduceMotionWiring.test.tsx` ทั้งหมดผ่านโดยไม่แก้ assertion ใดๆ เลย — ยืนยันว่า animation logic/prop contract เดิมไม่ถูกแตะจริง)
+
+### T131 — automated hardcode-color guard
+เพิ่ม `src/__tests__/theme/noHardcodedHexRound15.test.ts` — source-text regex guard (แพทเทิร์นเดียวกับ `t120EntranceAnimationWiring.test.ts`) สแกน 6 ไฟล์ (`HomeScreen.tsx`, `Map3D.tsx`, `ProvinceTile3D.tsx`, `HeaderProgress.tsx`, `Legend.tsx`, `GlobalSearchBar.tsx`) หา literal hex (`#abc`/`#aabbcc`/`#aabbccdd`) หรือ `rgb()`/`rgba()` ใดๆ ที่ไม่ได้มาจาก `theme.ts` — ผ่านครบ 6/6 ไฟล์ (ยืนยันด้วย `grep` มือก่อนเขียน test ด้วยว่าไม่มี hex/rgba เหลือจริง)
+
+### สรุปผลรัน
+- `npx tsc --noEmit`: ผ่าน ไม่มี type error
+- `npx jest`: **81 suites ผ่าน / 435 passed + 1 skip / 0 failed**
+
+### จุดที่ทำไม่ได้ตาม spec 100% (ไม่ใช่ blocker ต้องส่งกลับ PM — บันทึกไว้เพื่อความโปร่งใส)
+- glossy top-edge highlight ของ tile (ProvinceTile3D) — spec ระบุว่า optional ไม่บังคับ ข้ามในรอบนี้เพื่อลดความเสี่ยงใกล้ animation code
+- ตัวเลข hero stat ของ HeaderProgress อยู่บรรทัดเดียวกับ prefix/suffix (ไม่ได้ขึ้นบรรทัดใหม่ตามภาพประกอบ "บรรทัดรอง" ใน spec) — เหตุผลทางเทคนิคผูกกับการรักษา exact-string ของ `getByText` ในเทสต์เดิมตามที่อธิบายไว้ข้างบน ไม่กระทบความหมาย/สาระของ hierarchy ที่ spec ต้องการ (ตัวเลขเด่นกว่าข้อความรอบข้างชัดเจน)
+
+## ประวัติการแก้บั๊ก — US-35/US-36 Color Palette & HomeScreen Redesign (แก้หลัง QA ตีกลับ)
+
+### รอบ 16 (qa-result.md รอบ 16, บั๊กเดียว / US-35 AC2 (P0) — ส่งกลับโดย QA, root cause = โค้ด)
+- **บั๊ก**: `src/screens/HomeScreen.tsx` — `styles.statsLink` (ลิงก์ "สถิติ" บน TopBar) ใช้ `color: COLORS.accent` (`#15A87A`) บนพื้น `COLORS.background` (`#F6F9F7`) → contrast วัดจริง **2.87:1** ไม่ผ่าน WCAG AA (ต้อง ≥4.5:1) — QA ตัดสินว่าเข้าข่าย "ข้อความสำคัญ" ตาม US-35 AC2 เพราะเป็นจุดที่ผู้ใช้ต้องอ่าน/แตะทุกครั้งที่เปิดแอป
+- **แก้**: เปลี่ยน `styles.statsLink.color` จาก `COLORS.accent` → `COLORS.accentDark` (`#0B5C46`) เท่านั้น (1 บรรทัด ไฟล์เดียว)
+- **คำนวณ contrast ใหม่เอง** (ไม่ใช้ตัวเลข 7.05:1 ของคู่ `accentDark`-on-`accentSurface` ตรงๆ เพราะ `statsLink` วางอยู่บนพื้น `COLORS.background` ไม่ใช่ `accentSurface` — คนละพื้นหลัง): re-implement สูตร WCAG relative-luminance ด้วยมือ (แยกจาก `us35TokenAndContrastAudit.test.ts`) ได้ `accentDark (#0B5C46)` บน `background (#F6F9F7)` = **7.51:1** ผ่าน WCAG AA แบบเหลือเฟือ (>4.5:1 ที่ต้องการ และเกิน 7:1 ของเกณฑ์ AAA ด้วยซ้ำ) — ไม่ต้องปรับ font-weight/size เพิ่มเติม
+- **regression guard**: `npx tsc --noEmit` ผ่านสะอาด ไม่มี type error; `npx jest` เต็มชุด **82 suites ผ่าน / 1 suite fail / 478 passed + 1 skip / 1 failed**
+  - suite ที่ fail คือ `src/__tests__/qa-round15/us35TokenAndContrastAudit.test.ts` เคส `[finding] accent (topBar "สถิติ" link text) on background` — **เป็นการ fail ที่มีอยู่ก่อนแก้บั๊กนี้แล้ว (ไม่ใช่ regression จากการแก้ของรอบนี้)** เพราะเทสต์เคสนี้ hardcode เช็ก `contrastRatio(COLORS.accent, COLORS.background)` ตรงๆ จาก `theme.ts` (ไม่ได้ import/เรนเดอร์ `HomeScreen.tsx` เลย) ซึ่งค่า `COLORS.accent`/`COLORS.background` ไม่ได้ถูกแก้ในรอบนี้ (แก้แค่ว่า `statsLink` เลือกใช้ token ไหน ไม่ได้แก้ค่า hex ของ token `accent` เอง) จึงยังคงค่าเดิม 2.87:1 เหมือนก่อนแก้ทุกประการ
+  - เคสนี้เป็นเทสต์ที่ QA/Tester เขียนไว้เพื่อ "บันทึก finding" ของบั๊กนี้ตั้งแต่รอบ 15/16 โดยเจตนา (ดู comment ในไฟล์บรรทัด 79-84) — ตอนนี้บั๊กจริงถูกแก้แล้วที่จุดใช้งานจริง (`statsLink` ไม่ใช้ `COLORS.accent` อีกต่อไป) แต่เทสต์เคสนี้จะไม่มีวัน pass ได้จนกว่า QA/Tester จะอัปเดตให้เช็กสิ่งที่ component เรนเดอร์จริง (เช่น import `HomeScreen` แล้วเช็ก `statsLink` style) แทนการเช็ก raw token `COLORS.accent` ตรงๆ — **ไม่ได้แก้ไฟล์นี้เองเพราะอยู่นอกขอบเขตที่ได้รับ (แก้เฉพาะ `statsLink` ใน `HomeScreen.tsx` เท่านั้น และไฟล์นี้เป็นของ QA/Tester)** — แจ้งให้ orchestrator/QA ทราบเพื่อพิจารณาอัปเดต test เคสนี้ในรอบตรวจถัดไป
+- **ขอบเขตที่ไม่แตะ**: ประเด็นรอง 2 ข้อจาก QA รอบ 16 (hero stat line break, `mapCanvasBg` เป็นขาวล้วน) ยังรอ PM/UIUX ตัดสินใจ — ไม่ได้แก้ในรอบนี้ตามที่ระบุขอบเขต
+
+## รอบ 18 — Phase 2 US-37 (Color Palette & Layout Redesign เฟส 2)
+
+### T133 — `src/screens/ProvinceDetailScreen.tsx`
+- แทน hex: `header.borderBottomColor: '#F0F0F0'` → `COLORS.border`, `backButton.backgroundColor: '#F2F2F2'` → `COLORS.trackBg`, `addButtonText.color: '#FFFFFF'` → `COLORS.textOnDark`
+- Spacing: เพิ่ม style ใหม่ `sectionGap: { marginBottom: SPACING.lg }` ครอบ `ProvinceMasterBadge` และ `LandmarkList` ด้วย `<View>` เพิ่ม, `addButton.marginBottom` เปลี่ยนจาก `SPACING.xs` → `SPACING.lg`
+- **ProvinceMasterBadge wrapper เป็น conditional** (`isMaster ? styles.sectionGap : undefined`) แทนที่จะครอบด้วย margin เสมอ — เหตุผล: component เดิม return `null` เมื่อ `!visible` (ไม่กิน layout เลย ตาม comment ในไฟล์ต้นทาง) ถ้าครอบด้วย `<View style={{marginBottom: SPACING.lg}}>` แบบไม่มีเงื่อนไข จะเกิดช่องว่างเปล่าที่ไม่เคยมีมาก่อนทุกครั้งที่ยังไม่ใช่ Province Master (กรณีส่วนใหญ่) ถือเป็น regression ทาง visual ที่ไม่ได้ตั้งใจ จึงครอบแบบมีเงื่อนไขแทน
+- gap ระหว่าง `LandmarkList` → ปุ่ม/section ถัดไปได้จาก `addButton`/`LandmarkList` wrapper margin ที่ตั้งไว้ `SPACING.lg` เท่ากันทุกจุด — ไม่ได้แก้ margin ภายใน `ProvinceMasterBadge.tsx`/`LandmarkList.tsx` เอง (นอก scope ของไฟล์นี้ ทั้งสอง component มี margin ภายในของตัวเองอยู่แล้วซึ่งจะบวกเพิ่มจาก wrapper — ผลคือช่องว่างจริงบางจุดมากกว่า `SPACING.lg` เล็กน้อยเมื่อ badge แสดง แต่ไม่ขัดกับเป้าหมายหลักของ spec คือ "แยก block ชัดเจนขึ้น")
+- ไม่แตะลำดับ/จำนวน section และไม่ลบ `variant="emphasized"` ของปุ่ม "+เพิ่มบันทึกใหม่"
+
+### T134 — `src/screens/AddEntryScreen.tsx`
+- แทน hex ตามตาราง spec ครบ: header border/back button, `card.backgroundColor` → `COLORS.surface`, `textInput`/`dateInput`/`landmarkChip.borderColor` → `COLORS.border`, `saveButtonText`/`landmarkChipTextSelected`.color → `COLORS.textOnDark` (รวม `ActivityIndicator color="#FFFFFF"` ของปุ่มบันทึกด้วย เพื่อความสม่ำเสมอ ไม่หลงเหลือ literal ขาว)
+- เพิ่ม `borderWidth: 1, borderColor: COLORS.borderLight` ให้ style `card` ตาม spec (แยกขอบเขตการ์ดจากพื้นหลัง mint อ่อน)
+- ไม่แตะ `validate()`/`handleSave()`/`handleDelete()`/Nominatim search/PhotoPicker/TagSelector/landmark chip selection logic ใดๆ ตามที่กำหนด
+
+### T135 — `src/components/LandmarkCard.tsx`
+- แทน hex ทั้งหมดยกเว้น scrim สีดำโปร่งใสของภาพ (ดูหมายเหตุด้านล่าง): `card` bg/border → `COLORS.surface`/`COLORS.borderLight`, `cardVisited.borderColor` (เดิม hex เก่า `#1D9E7540` = accent เก่า+alpha) → `withAlpha(COLORS.accent, 0.25)` (ใช้ helper `withAlpha` ที่มีอยู่แล้วในไฟล์), `cardVisited.backgroundColor` → `COLORS.accentSurface`, `imageContainer` placeholder bg → `COLORS.trackBg`, shimmer gradient (`#E8E8E8`/`#F4F4F4`) → `COLORS.trackBg`/`COLORS.borderLight`, `categoryText`/`heroTitle` white text → `COLORS.textOnDark`, `checkinButtonInactive` bg/border → `COLORS.borderLight`/`COLORS.border`, `checkinButtonActive.backgroundColor` → `COLORS.accentSurface`
+- **ไม่แตะ**: `CATEGORY_COLORS`/`CATEGORY_COLOR_FALLBACK` (semantic, คนละเรื่องกับ palette), `variant="emphasized"`/entrance animation ใดๆ
+- **จุดที่เหลือ hex ไว้โดยตั้งใจ**: `rgba(0,0,0,0.7)` / `rgba(0,0,0,0.25)` (photo-dimming scrim gradient คลุมรูปภาพ) และ `textShadowColor: 'rgba(0,0,0,0.5)'` (เงาตัวอักษร heroTitle บนรูป) — เป็น generic black overlay สำหรับ contrast ของข้อความบนรูปภาพจริง ไม่ใช่สีตาม brand palette และไม่มี token ใน `theme.ts` ที่ตรงความหมาย (ห้ามแก้ `theme.ts` เอง) การบังคับแทนด้วย token ที่มีอยู่ (เช่น `tooltipBg`) จะเปลี่ยนค่า opacity/สีที่ตั้งใจไว้สำหรับ 2 ระดับความเข้ม (hero 0.7 vs compact 0.25) จึงปล่อยไว้ตามเดิม — ไม่กระทบ T140 audit เพราะเจตนาของ AC1 คือไล่ hex ของ brand เก่า/ใหม่ ไม่ใช่ generic overlay
+
+### T136 — `src/screens/StatsScreen.tsx`
+- `statTile.backgroundColor: '#FFFFFF'` → `COLORS.surface` (จุดเดียวที่พบ)
+
+### T137 — `src/screens/SettingsScreen.tsx`
+- `header.borderBottomColor` → `COLORS.border`, `backButtonWrap.backgroundColor` → `COLORS.trackBg`, `accountCard.backgroundColor` → `COLORS.surface`, `linkButtonText.color` → `COLORS.textOnDark`
+
+### T138 — `src/screens/NewsScreen.tsx` + `src/components/NewsCard.tsx`
+- `NewsScreen.tsx` เอง grep แล้วไม่พบ hex hardcode เลย (ใช้ token ครบอยู่แล้ว)
+- `NewsCard.tsx` ("การ์ดข่าว" ตามที่ระบุใน task): shimmer gradient `[COLORS.trackBg, '#EFF7F3']` → `[COLORS.trackBg, COLORS.borderLight]`, `card` bg/border → `COLORS.surface`/`COLORS.borderLight`
+- ไม่ได้แตะ `NewsErrorState.tsx`/`NewsLoadingSkeleton.tsx`/`NewsCacheIndicator.tsx` (มี hex hardcode สีขาวเช่นกันใน `NewsErrorState.tsx`) เพราะไม่ได้อยู่ใน 4 ไฟล์ที่ระบุชื่อไว้ + spec ระบุเฉพาะ "รวมการ์ดข่าว" (NewsCard) ไม่ได้ระบุ error/skeleton state — **แจ้งไว้เผื่อ T140 audit เจอ**: `src/components/NewsErrorState.tsx` มี `color: '#FFFFFF'` (ปุ่ม retry, บรรทัด 32/58) ที่ยังไม่ได้แปลงเป็น token หากต้องการให้ครบ 100% ต้องขยาย scope เพิ่มไฟล์นี้
+
+### T139 — Regression guard
+- `npx tsc --noEmit -p .` → ผ่านสะอาด ไม่มี type error
+- `npx jest` เต็มชุด → **83 suites ผ่าน / 480 passed + 1 skip / 0 failed** (baseline เดิมก่อนรอบนี้คือ 480 passed + 1 skip เท่ากัน ไม่มี suite ใหม่ล้ม)
+  - ระหว่างรันครั้งแรกเจอ `src/__tests__/qa-round2/syncLifecycle.test.tsx` fail 1 เคสตอนรันเต็มชุด (`render function has not been called`) — รันไฟล์นี้แยกเดี่ยวผ่านทั้ง 3/3 เคส ทันที ยืนยันว่าเป็น flaky test-order/act() cross-contamination ที่มีอยู่ก่อนแล้วในชุดเทสต์ (ไม่เกี่ยวกับการแก้สี/spacing ของรอบนี้เลย เพราะไม่ได้แตะไฟล์ sync ใดๆ) รันเต็มชุดซ้ำอีกครั้งผ่านครบ 83/83 ไม่มี fail — ไม่ต้องแก้ assertion ใดๆ
+  - ไม่พบ regression เชิงพฤติกรรมใดๆ จากการแก้สี/spacing ของ T133-T138
+
+### จุดที่ทำไม่ได้ตาม spec 100% / ต้องการให้ PM ทราบ (ไม่ block)
+- `NewsErrorState.tsx` ยังมี `#FFFFFF` หลงเหลือ (ไม่อยู่ใน scope ที่ได้รับสำหรับ T138) — ถ้าต้องการให้ 6 ไฟล์+ผ่าน T140 audit แบบ zero-hex จริง ต้องขยาย scope ให้ programmer แก้ไฟล์นี้เพิ่ม (แก้ไม่ยาก 1 บรรทัด)
+- ProvinceDetailScreen: gap ระหว่าง section ที่มี `ProvinceMasterBadge`/`LandmarkList` (ซึ่งมี margin ภายในของตัวเองอยู่แล้ว) รวมกับ wrapper `SPACING.lg` ใหม่ ทำให้ gap จริงมากกว่า `SPACING.lg` เป๊ะๆ เล็กน้อยในบางจุด (ไม่ใช่ปัญหาฟังก์ชัน แค่ไม่ pixel-perfect ตาม spec 100% เพราะไม่ได้แก้ margin ภายในของสอง component นั้นซึ่งอยู่นอกไฟล์ที่ได้รับมอบหมาย T133)

@@ -1,5 +1,5 @@
 import React, { useCallback } from 'react';
-import { FlatList, Pressable, SafeAreaView, StyleSheet, Text, View } from 'react-native';
+import { SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
 import { useJournal } from '../storage/JournalContext';
@@ -12,7 +12,9 @@ import EntryListItem from '../components/EntryListItem';
 import EmptyState from '../components/EmptyState';
 import LandmarkList from '../components/LandmarkList';
 import ProvinceMasterBadge from '../components/ProvinceMasterBadge';
-import { COLORS } from '../theme';
+import PressableScale from '../components/PressableScale';
+import ShimmerBlock from '../components/ShimmerBlock';
+import { COLORS, RADIUS, SHADOWS, SPACING } from '../theme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ProvinceDetail'>;
 
@@ -53,51 +55,67 @@ export default function ProvinceDetailScreen({ route, navigation }: Props) {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <Pressable onPress={() => navigation.goBack()} hitSlop={8}>
-          <Text style={styles.backButton}>‹ กลับ</Text>
-        </Pressable>
+        <PressableScale
+          haptic="light"
+          style={styles.backButton}
+          onPress={() => navigation.goBack()}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="กลับ"
+        >
+          <Text style={styles.backButtonText}>‹ กลับ</Text>
+        </PressableScale>
         <Text style={styles.title}>{province.nameTh}</Text>
         <View style={styles.headerSpacer} />
       </View>
 
-      <ProvinceMasterBadge visible={isMaster} />
-
-      <LandmarkList
-        provinceId={provinceId}
-        provinceNameTh={province.nameTh}
-        checkins={checkins}
-        loading={checkinsLoading}
-        onToggle={(landmarkId, pId) => toggleCheckin(landmarkId, pId)}
-      />
-
-      {!loading && provinceEntries.length > 0 ? (
-        <Pressable style={styles.addButton} onPress={goToAddEntry}>
-          <Text style={styles.addButtonText}>+ เพิ่มบันทึกใหม่</Text>
-        </Pressable>
-      ) : null}
-
-      {loading ? (
-        <View style={styles.skeletonList}>
-          {[0, 1, 2].map((i) => (
-            <View key={i} style={styles.skeletonRow} />
-          ))}
+      <ScrollView
+        style={styles.scrollBody}
+        contentContainerStyle={styles.listContent}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
+        <View style={isMaster ? styles.sectionGap : undefined}>
+          <ProvinceMasterBadge visible={isMaster} />
         </View>
-      ) : provinceEntries.length === 0 ? (
-        <EmptyState
-          message="ยังไม่มีบันทึกของจังหวัดนี้"
-          actionLabel="+ เพิ่มบันทึกใหม่"
-          onAction={goToAddEntry}
-        />
-      ) : (
-        <FlatList
-          data={provinceEntries}
-          keyExtractor={(item) => item.id}
-          renderItem={({ item }) => (
-            <EntryListItem entry={item} onPress={() => goToEditEntry(item.id)} />
-          )}
-          contentContainerStyle={styles.listContent}
-        />
-      )}
+
+        <View style={styles.sectionGap}>
+          <LandmarkList
+            provinceId={provinceId}
+            provinceNameTh={province.nameTh}
+            checkins={checkins}
+            loading={checkinsLoading}
+            onToggle={(landmarkId, pId) => toggleCheckin(landmarkId, pId)}
+          />
+        </View>
+
+        {!loading && provinceEntries.length > 0 ? (
+          <PressableScale variant="emphasized" haptic="medium" style={styles.addButton} onPress={goToAddEntry} accessibilityRole="button">
+            <Text style={styles.addButtonText}>+ เพิ่มบันทึกใหม่</Text>
+          </PressableScale>
+        ) : null}
+
+        {loading ? (
+          <View style={styles.skeletonList}>
+            {[0, 1, 2].map((i) => (
+              <ShimmerBlock key={i} style={styles.skeletonRow} />
+            ))}
+          </View>
+        ) : provinceEntries.length === 0 ? (
+          <EmptyState
+            message="ยังไม่มีบันทึกของจังหวัดนี้"
+            actionLabel="+ เพิ่มบันทึกใหม่"
+            onAction={goToAddEntry}
+          />
+        ) : (
+          <>
+            <Text style={styles.sectionLabel}>บันทึกทั้งหมด ({provinceEntries.length})</Text>
+            {provinceEntries.map((item) => (
+              <EntryListItem key={item.id} entry={item} onPress={() => goToEditEntry(item.id)} />
+            ))}
+          </>
+        )}
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -108,23 +126,44 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 12,
+    paddingHorizontal: SPACING.md,
+    paddingTop: SPACING.xs,
+    paddingBottom: SPACING.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
   },
-  backButton: { fontSize: 15, color: COLORS.accent, width: 60 },
+  backButton: {
+    minWidth: 44,
+    height: 40,
+    paddingHorizontal: SPACING.sm,
+    borderRadius: RADIUS.full,
+    backgroundColor: COLORS.trackBg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  backButtonText: { fontSize: 15, color: COLORS.accent, fontWeight: '700' },
   headerSpacer: { width: 60 },
   title: { fontSize: 20, fontWeight: '700', color: COLORS.textPrimary, flex: 1, textAlign: 'center' },
+  scrollBody: { flex: 1 },
+  sectionGap: { marginBottom: SPACING.lg },
   addButton: {
-    marginHorizontal: 16,
-    marginBottom: 8,
+    marginHorizontal: SPACING.md,
+    marginBottom: SPACING.lg,
     backgroundColor: COLORS.accent,
-    borderRadius: 8,
-    paddingVertical: 12,
+    borderRadius: RADIUS.lg,
+    paddingVertical: SPACING.sm,
     alignItems: 'center',
+    ...SHADOWS.md,
   },
-  addButtonText: { color: '#FFFFFF', fontWeight: '700', fontSize: 15 },
-  listContent: { paddingBottom: 24 },
-  skeletonList: { paddingHorizontal: 16, gap: 10 },
-  skeletonRow: { height: 56, borderRadius: 8, backgroundColor: '#EEEEEE' },
+  addButtonText: { color: COLORS.textOnDark, fontWeight: '700', fontSize: 15 },
+  listContent: { paddingBottom: SPACING.xl },
+  sectionLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
+    marginHorizontal: SPACING.md,
+    marginBottom: SPACING.xs,
+  },
+  skeletonList: { paddingHorizontal: SPACING.md, gap: SPACING.sm },
+  skeletonRow: { height: 56, borderRadius: RADIUS.md },
 });

@@ -1,22 +1,48 @@
 // Shared theme constants (docs/design-spec.md "โทนสี").
+// รอบ 15 / US-35: "Deep Jade" palette — evolves the original mint-green
+// (#1D9E75/#0F6E56) into a more saturated jewel-tone emerald, on a warmer
+// mint-white background instead of flat white. See docs/design-spec.md
+// "ตัวเลือก A: Deep Jade" for the full before/after token table and
+// docs/tasks.md "T125 — ผลตัดสินใจ" for the Decision Gate sign-off. This file
+// is the SINGLE place these values are defined — no other file should
+// hardcode a hex color for anything covered by a token here.
 export const COLORS = {
-  lockedTop: '#D9D9D9',
-  lockedTopLoading: '#E8E8E8', // slightly lighter placeholder used only during initial data load
-  unlockedTop: '#1D9E75',
-  unlockedSide: '#0F6E56',
-  accent: '#1D9E75',
-  accentDark: '#0F6E56',
-  trackBg: '#E5E5E5',
-  textPrimary: '#1A1A1A',
-  textSecondary: '#6B6B6B',
+  lockedTop: '#CBD3CF',
+  lockedTopLoading: '#E3E8E5', // slightly lighter placeholder used only during initial data load
+  unlockedTop: '#15A87A',
+  unlockedSide: '#0B5C46',
+  accent: '#15A87A',
+  accentDark: '#0B5C46',
+  trackBg: '#DCE4E0',
+  textPrimary: '#122019',
+  textSecondary: '#5B6B63',
   danger: '#D9534F',
-  background: '#FFFFFF',
+  background: '#F6F9F7',
   // Landmark & Supabase Integration round (docs/design-spec.md "โทนภาพรวมเพิ่มเติม").
   amber: '#F5A623', // data-loss warning — "แจ้งให้ทราบ" not an error
   amberBg: '#FDF3E3',
-  gold: '#E5B93C', // Province Master reward accent
+  gold: '#D8A93B', // Province Master reward accent
   syncPending: '#9B9B9B',
   syncSynced: '#5CB88A',
+  // รอบ 15 / US-36 (Color Palette & Layout Redesign, HomeScreen): additional
+  // surface/utility tokens introduced while redesigning HomeScreen.tsx,
+  // Map3D.tsx, ProvinceTile3D.tsx, HeaderProgress.tsx, Legend.tsx and
+  // GlobalSearchBar.tsx — added here so those files never need to hardcode a
+  // new hex value of their own (T126/T131).
+  surface: '#FFFFFF', // plain white card/dropdown/legend-chip surfaces
+  accentSurface: '#E3F5EF', // soft accent-tinted surface for the HeaderProgress "hero stat" card + hint banner
+  // T125 decision on `mapCanvasBg` (docs/tasks.md "T125 — ผลตัดสินใจ"): "ทางเลือก
+  // B" — a light tint, NOT a dark hero canvas, since Deep Jade is an all-light
+  // palette. Kept equal to `surface` (pure white) so the Map3D hero card reads
+  // as "white canvas on a soft mint page" — the simplest way to satisfy that
+  // brief without inventing a new arbitrary in-between tint.
+  mapCanvasBg: '#FFFFFF',
+  mapAmbientShadow: 'rgba(11,92,70,0.16)', // soft ground-shadow ellipse under the tilted 3D tile grid (derived from accentDark)
+  tooltipBg: 'rgba(18,32,25,0.88)', // Map3D long-press tooltip pill (derived from textPrimary; replaces the old hardcoded rgba(26,26,26,0.88))
+  textOnDark: '#FFFFFF', // text/stroke placed on dark surfaces (tooltip label, tile top-face edge highlight)
+  border: '#E8ECE9', // standard hairline border for cards/inputs (search bar, dropdown)
+  borderLight: '#F0F3F1', // lighter hairline for list-row dividers (search dropdown rows)
+  muted: '#8C9B95', // placeholder text / muted icons (search placeholder, clear ✕, dropdown ›)
 } as const;
 
 // Advanced UI/UX Upgrade round (docs/design-spec.md "ส่วนเพิ่มเติม: Advanced UI/UX Upgrade").

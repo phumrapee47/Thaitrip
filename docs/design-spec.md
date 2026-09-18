@@ -528,3 +528,485 @@
 ## ข้อควรระวังสำหรับรอบถัดไป
 - `Map3D.tsx`/`ProvinceTile3D.tsx` ยังไม่ได้แตะ (ทั้ง geometry และ interaction) — ถ้าจะทำต่อควรแยกเป็นรอบเฉพาะเพราะเป็น SVG/3D transform ที่ซับซ้อนและมี test coverage เยอะ (`map3d.test.tsx`, `map2dValidationScreen.test.tsx`)
 - `EmailLinkForm.tsx` ยังไม่ได้ตรวจ/ยกระดับในรอบนี้
+
+---
+
+# ส่วนเพิ่มเติม: Bottom Tab Navigation & ข่าวท่องเที่ยว RSS (US-28 – US-32)
+
+หมายเหตุขอบเขต: ส่วนนี้ครอบคลุมเฉพาะ task ที่ติดป้าย **[รอ design-spec]** ในรอบนี้ ได้แก่ T94 (ไอคอน tab bar จริง แทน text label ชั่วคราวจาก T92) และ T101–T104 (NewsScreen ทั้งหมด: list/loading/pull-to-refresh, news item card, empty/error state, cache indicator) — ไม่แตะโครงสร้าง navigation wiring จริง (T91–T93, T95–T96 เป็นงาน non-UI ของ programmer) ไม่เพิ่มหน้าจอใหม่นอกเหนือจาก NewsScreen หน้าเดียว ส่วน HomeScreen/StatsScreen/SettingsScreen เดิมไม่เปลี่ยน layout ภายใน (มีแค่ tab bar ห่อรอบนอกเพิ่มเข้ามา)
+
+โทนภาพรวมเพิ่มเติม:
+- NewsScreen ต้อง "ดูเป็นแอปเดียวกัน" กับ Landmark List/Card ที่ทำไว้แล้วใน v2–v3 — ใช้ token ชุดเดียวกันทั้งหมด (`COLORS`, `SPACING`, `RADIUS`, `SHADOWS` จาก `src/theme.ts`) การ์ดข่าวใช้ white card + `SHADOWS.sm` + `RADIUS.lg` + border `#EFEFEF` แบบเดียวกับ `LandmarkCard`/`EntryListItem` ไม่ใช่ native list แบบ iOS Mail/plain row ที่ไม่มีเงา/ไม่มีขอบ
+- ทั้งแอปยังไม่เคยติดตั้ง icon library ใดๆ (`@expo/vector-icons` ยังไม่ยืนยันว่าใช้ได้จริงในโปรเจกต์นี้ — ดู T91) และ pattern ปัจจุบันของแอปใช้ **emoji เป็นไอคอนเสมอ** (⚙️ settings, ⭐ Province Master, 🖼️/🗺️ segmented toggle) — สเปกนี้ยึด pattern เดิมเป็นดีฟอลต์ที่ implement ได้ทันทีไม่ต้องรอผล T91 พร้อมระบุไอคอนชุด vector สำรองไว้เผื่อ T91 ยืนยันว่าใช้ได้จริง
+- Error/offline messaging ของข่าว (T103, T106, T107) ใช้โทนกลาง (`COLORS.textSecondary` + ปุ่ม accent เขียว) เหมือน `LandmarkFetchErrorState` เดิมใน `LandmarkList.tsx` — **ไม่ใช้สีแดง/`COLORS.danger`** เพราะเป็นความล้มเหลวของแหล่งข้อมูลภายนอก/เครือข่าย ไม่ใช่ validation error ของผู้ใช้ ตรงตามหลักการเดิมของแอปที่แยกโทนสีตามความหมาย ("error ของระบบ" vs "แจ้งให้ทราบ/ข้อจำกัดภายนอก")
+
+---
+
+## User Flow: US-28 (Bottom Tab Bar — สลับแท็บ "แผนที่" / "ข่าว")
+1. ผู้ใช้เปิดแอป เห็น Bottom Tab Bar ปรากฏอยู่เสมอที่ขอบล่างของจอ (2 แท็บ: "แผนที่" ซ้าย, "ข่าว" ขวา) ไม่ว่าจะอยู่หน้าจอใดในแท็บปัจจุบัน (ยกเว้นตอนอยู่ใน AddEntry ที่ full-screen push ทับ — ดูหมายเหตุ Thumb-zone ด้านล่าง)
+2. แท็บ "แผนที่" เป็นแท็บเริ่มต้นเสมอเมื่อเปิดแอปครั้งแรกในแต่ละเซสชัน แสดง HomeScreen เดิมทุกประการ (3D Map, GlobalSearchBar, Header Progress, Legend, ปุ่ม Stats/Settings ใน header)
+3. ผู้ใช้แตะแท็บ "ข่าว" → สลับไปแสดง NewsScreen ทันที (ไม่มี transition/animation แบบ push, เป็น swap มาตรฐานของ bottom-tabs) แท็บที่ active เปลี่ยนสีไอคอน/label เป็น `COLORS.accent` ทันที ส่วนแท็บที่ไม่ active เป็น `COLORS.textSecondary`
+4. ผู้ใช้แตะจังหวัด/Landmark จากแท็บ "แผนที่" → push ProvinceDetail/AddEntry ภายใน stack ของแท็บ "แผนที่" ตามเดิม (bottom tab bar ยังคงแสดงอยู่ระหว่าง ProvinceDetail เพราะเป็น stack ปกติ ไม่ใช่ modal เต็มจอ — ส่วน AddEntry ที่เป็น full-screen push อาจซ่อน tab bar ชั่วคราวตาม native behavior ของ `bottom-tabs`+`native-stack` ซ้อนกัน ซึ่งเป็นพฤติกรรมมาตรฐานที่ยอมรับได้ ไม่ต้องบังคับให้เห็นตลอด)
+5. ผู้ใช้สลับไปแท็บ "ข่าว" แล้วกลับมาแท็บ "แผนที่" → เห็นหน้าจอ/scroll position เดิมที่ค้างอยู่ทันที (nested stack ของแท็บ "แผนที่" ไม่ unmount/reset เมื่อสลับแท็บออกไป ตามพฤติกรรมมาตรฐานของ `@react-navigation/bottom-tabs`)
+6. จากทั้ง 2 แท็บ ผู้ใช้แตะไอคอน "สถิติ"/"ตั้งค่า" ใน header ได้เสมอ → push เข้า stack ของแท็บปัจจุบันที่ผู้ใช้อยู่ (ไม่ใช่ข้ามไปแท็บอื่น) กดย้อนกลับแล้วกลับสู่หน้าจอเดิมในแท็บนั้น
+
+## User Flow: US-29 / US-30 (ดูข่าว + cache/offline)
+1. ผู้ใช้แตะแท็บ "ข่าว" ครั้งแรกของเซสชัน (หรือเปิดแอปมาที่แท็บนี้)
+2. ถ้ายังไม่มี cache เดิมเลย (เปิดแอปครั้งแรกสุด) และกำลังดึงข้อมูลอยู่ → เห็น News Loading Skeleton (shimmer) ทันที ไม่ใช่จอว่างเปล่า
+3. ดึงสำเร็จ → เห็นรายการ News Card เรียงจากข่าวล่าสุดไปเก่าสุด แต่ละใบมีรูปปก/placeholder, หัวข้อ, สรุปสั้น, วันที่
+4. ถ้ามี cache เดิมอยู่แล้ว (ไม่ว่าจะยังไม่หมดอายุหรือหมดอายุแล้ว) → เห็นรายการจาก cache ทันทีก่อนเสมอ (ไม่รอ network) — ถ้า cache หมดอายุ (เกิน 45 นาที) และมีเน็ต ระบบ fetch ใหม่ในพื้นหลังแบบเงียบๆ แล้วสลับรายการเป็นชุดใหม่เมื่อโหลดเสร็จโดยไม่กระพริบ/ไม่ reset scroll position กลับบนสุด (ถ้าผู้ใช้ยังอยู่ตำแหน่งกลาง list)
+5. ผู้ใช้ทำ pull-to-refresh (ลากลงจากบนสุดของ list) → เห็น native RefreshControl spinner สีเขียว (`COLORS.accent`) หมุนขณะดึงใหม่ พร้อม haptic light ทันทีที่ปล่อยนิ้วเข้าเงื่อนไข refresh (ไม่ต้องรอ fetch เสร็จ) → เมื่อเสร็จ list อัปเดตและ spinner หายไป
+6. ถ้าตอนนี้ไม่มีเน็ต/ดึงล้มเหลว แต่มี cache เดิม → เห็นรายการจาก cache พร้อม Cache Indicator บาง ๆ ด้านบนสุดของ list บอกว่า "กำลังแสดงข่าวจากแคช • อัปเดตล่าสุด HH:mm" ไม่ใช่ error เต็มจอ
+7. ถ้าไม่มีเน็ต/ดึงล้มเหลว และไม่เคยมี cache สำเร็จมาก่อนเลย → เห็น News Error State เต็มพื้นที่ list แทน (ไอคอน + ข้อความ + ปุ่ม "ลองอีกครั้ง")
+8. ถ้า feed ดึงสำเร็จแต่ไม่มีข่าวเลย (รายการว่างจริง) → เห็น News Empty State แทน list (แยกจาก error state ข้อ 7 อย่างชัดเจน)
+
+## User Flow: US-31 / US-32 (เปิดอ่านข่าวผ่าน in-app browser + edge case)
+1. ผู้ใช้แตะ News Card ใดใน list → การ์ดหด scale ลงเบาๆ (PressableScale, scale 0.96) พร้อม haptic light ทันทีตอนกด ก่อนเปิด in-app browser (`expo-web-browser`) ไปยัง `link` ของข่าวนั้น
+2. ผู้ใช้อ่านเนื้อหาเต็มใน in-app browser (native modal overlay) แล้วกดปิด (ปุ่ม Done/กากบาทของ browser เอง) → กลับสู่ NewsScreen ที่ scroll position และรายการเดิมยังอยู่ครบ ไม่ reset กลับบนสุด (เพราะ NewsScreen ไม่ unmount ระหว่าง browser เปิดอยู่)
+3. ถ้า `link` ของข่าวนั้นว่างเปล่า/parse ผิดพลาด → แตะแล้วไม่เปิด browser แต่เห็น Inline Toast ข้อความ "ไม่สามารถเปิดข่าวนี้ได้" ปรากฏสั้นๆ แล้วหายไปเอง ไม่ crash ไม่ค้าง
+4. ถ้าไม่มีเน็ต ณ ตอนแตะข่าว → เห็น Inline Toast ข้อความ "ต้องเชื่อมต่ออินเทอร์เน็ตเพื่ออ่านข่าวเต็ม" แทนการเปิด browser ค้างเป็นหน้าขาว
+5. ข่าวที่ไม่มีรูป/รูปโหลดไม่สำเร็จ → เห็น News Card Placeholder Cover แทนรูปจริง (ไม่ใช่พื้นที่ว่าง/broken-image icon)
+6. ข่าวที่ซ้ำกัน (link/title ซ้ำ) หรือไม่มี pubDate ที่ parse ได้ → ผู้ใช้ไม่เห็นรายการซ้ำในลิสต์ และข่าวที่ไม่มีวันที่ถูกจัดไว้ท้ายสุดของ list เสมอ (พฤติกรรม data-layer ล้วนๆ ไม่มี UI แยก — News Card ของแถวนั้นแสดงผลปกติทุกอย่างยกเว้นส่วนวันที่ ดู Content ของ News Card ด้านล่าง)
+
+---
+
+## Components (ส่วนเพิ่มเติม รอบ Bottom Tab Navigation & ข่าวท่องเที่ยว RSS)
+
+### Bottom Tab Bar (T92, T94)
+- Purpose: root-level navigation ให้สลับระหว่างแท็บ "แผนที่" กับ "ข่าว" เข้าถึงได้จากทุกที่ในแอปด้วยการแตะครั้งเดียว
+- โครงสร้าง: `@react-navigation/bottom-tabs`, 2 แท็บคงที่เสมอ (ไม่มีแท็บที่ 3, ไม่ซ่อน/แสดงแบบมีเงื่อนไข)
+- ตำแหน่ง/Safe area: ยึดขอบล่างของจอเสมอ ใช้ safe-area inset อัตโนมัติของ `bottom-tabs` (มี `SafeAreaProvider` ของ `react-navigation` อยู่แล้วในโปรเจกต์) — iOS: bar สูง 49pt + safe-area bottom inset (รวมกันมักได้ ~83pt บนจอมี home indicator), Android: bar สูง 56pt + safe-area bottom inset ของ gesture nav (ถ้ามี) — ไม่ hardcode ความสูงเองเพื่อไม่ให้ชนกับ gesture bar ของแต่ละเครื่อง
+- Visual: พื้นหลังขาว (`COLORS.background`), เส้นขอบบน/เงาบาง (`SHADOWS.sm`) แยกจากเนื้อหาด้านบน แทนเส้นขีดทึบ 1px แบบ native ดีฟอลต์ ให้ดูเป็น elevated bar สอดคล้องกับ Bento card style ที่เหลือของแอป
+- Icon (ดีฟอลต์ที่ใช้งานได้ทันที — ไม่ต้องรอ T91): emoji ตาม pattern เดิมของแอป — "🗺️" สำหรับแท็บ "แผนที่", "📰" สำหรับแท็บ "ข่าว" วางเหนือ label ข้อความ ขนาด emoji ~20-22pt
+- Icon (ทางเลือกถ้า T91 ยืนยันว่า `@expo/vector-icons` ใช้งานได้จริง): Ionicons `map`/`map-outline` (แท็บแผนที่), `newspaper`/`newspaper-outline` (แท็บข่าว) — outline variant เมื่อ inactive, filled variant เมื่อ active ตาม native tab bar convention ทั่วไป โดยไม่เปลี่ยน label/สี/เลย์เอาต์อื่นใดจากที่ระบุด้านล่าง
+- สี:
+  - active: ไอคอน + label สี `COLORS.accent` (#1D9E75), label ตัวหนา (`fontWeight: '700'`)
+  - inactive: ไอคอน + label สี `COLORS.textSecondary` (#6B6B6B), label น้ำหนักปกติ (`fontWeight: '500'`)
+- States:
+  - active: ตามสี active ด้านบน, `accessibilityState={{ selected: true }}`
+  - inactive: ตามสี inactive ด้านบน, `accessibilityState={{ selected: false }}`
+  - pressed: ใช้ ripple/opacity feedback มาตรฐานของ `bottom-tabs` (ไม่ต้องเพิ่ม `PressableScale` custom เพราะ tab bar item เป็น native touchable ของ library ที่มี feedback ในตัวอยู่แล้ว — การ custom ทับอาจขัดกับ accessibility ที่ library จัดการให้)
+  - haptic: `Haptics.impactAsync(ImpactFeedbackStyle.Light)` ทุกครั้งที่แตะสลับแท็บสำเร็จ (แตะแท็บที่ active อยู่แล้วซ้ำไม่ trigger haptic ซ้ำ เพื่อไม่ให้รู้สึกสั่นพร่ำเพรื่อ)
+- Accessibility: แต่ละแท็บตั้ง `accessibilityRole="tab"` (หรือ `"button"` ถ้า library บังคับ role อื่น), `accessibilityLabel="แท็บแผนที่"` / `"แท็บข่าว"`, `accessibilityState={{ selected }}` ตามสถานะ active/inactive ปัจจุบัน — ให้ screen reader อ่านลำดับ "แท็บแผนที่, เลือกอยู่" ได้ถูกต้อง
+- Content: 2 tab item ("แผนที่", "ข่าว") เรียงจากซ้ายไปขวาตามลำดับที่ requirement ระบุ (แผนที่ก่อนเสมอเพราะเป็นฟีเจอร์หลักเดิม)
+
+### NewsScreen — List Container (T101)
+- Purpose: หน้าจอหลักของแท็บ "ข่าว" แสดงรายการข่าวทั้งหมด พร้อม pull-to-refresh
+- โครงสร้าง: `FlatList` (ไม่ใช่ `ScrollView` + `.map` เพราะต้องรองรับ `RefreshControl` + จำนวนข่าวที่อาจมากได้ตาม T112), header ของหน้าเป็น `SafeAreaView` + topBar เดียวกับ HomeScreen (ชื่อแอป/หัวข้อ "ข่าวท่องเที่ยว" ด้านซ้าย, ปุ่มไอคอน Stats/Settings ด้านขวา — เหมือน topBar ของ HomeScreen ทุกประการเพื่อความ consistent)
+- List spacing (8pt grid): screen padding แนวนอน `SPACING.md` (16), gap ระหว่างการ์ด `SPACING.sm` (12), padding บน/ล่างของ list content `SPACING.md`/`SPACING.xl` (เผื่อพื้นที่เหนือ Bottom Tab Bar ไม่ให้การ์ดสุดท้ายชิดขอบจอเกินไป)
+- States:
+  - loading-first (ยังไม่มี cache เลย กำลังดึงครั้งแรก): แสดง News Loading Skeleton แทน list ทั้งหมด (ดู component ด้านล่าง)
+  - success-fresh / success-cache (มีรายการอย่างน้อย 1 ชิ้นไม่ว่าจะจาก network สดหรือ cache): แสดง list ของ News Card ปกติ, ถ้าเป็นข้อมูล cache ที่ fetch สดล้มเหลว/ไม่มีเน็ตขณะนี้ → แสดง Cache Indicator เป็น `ListHeaderComponent` ด้านบนสุดของ list เพิ่มเข้ามา
+  - refreshing: `RefreshControl` แสดงระหว่าง pull-to-refresh (native spinner, ไม่ใช่ shimmer เพราะเป็น native gesture-driven indicator ที่ผู้ใช้คุ้นเคยอยู่แล้ว ไม่ขัดกับกฎ SKILL.md 4.1 ซึ่งพูดถึงการโหลดเนื้อหาเริ่มต้นที่มี layout ชัดเจน ไม่ใช่ refresh gesture) — list เดิมยังแสดงอยู่ด้านล่าง ไม่ใช่แทนที่ด้วย skeleton
+  - empty: feed คืนรายการว่างเปล่าจริง → แสดง News Empty State แทน list ทั้งหมด
+  - error (ล้มเหลว + ไม่มี cache): แสดง News Error State แทน list ทั้งหมด
+- Content: `ListHeaderComponent` (Cache Indicator ถ้ามี) + array ของ News Card + `ItemSeparatorComponent` (ระยะห่าง `SPACING.sm` ระหว่างการ์ด — ใช้ margin ของการ์ดเองแทนก็ได้)
+
+### News Loading Skeleton (T101)
+- Purpose: shimmer skeleton ระหว่างดึงข้อมูลครั้งแรกที่ยังไม่มี cache — ตามกฎ SKILL.md 4.1 (ห้าม `ActivityIndicator` เดี่ยวกลางจอสำหรับเนื้อหาที่มี layout ชัดเจน) ใช้ `ShimmerBlock` ที่มีอยู่แล้วในโปรเจกต์
+- จำนวน/layout: 5 การ์ด skeleton เรียงแนวตั้ง ขนาด/สัดส่วนจำลอง News Card จริงเป๊ะ (thumbnail 88×88 ซ้าย + 2 บรรทัดข้อความยาวไม่เท่ากันขวา + 1 บรรทัดวันที่สั้นด้านล่าง) เพื่อไม่เกิด layout shift ตอนข้อมูลจริงมาแทน
+- States: single state (แสดงเฉพาะตอน loading-first เท่านั้น หายไปทันทีที่มีข้อมูล — ไม่ว่าจาก network หรือ cache)
+- Content: pulse opacity 0.4↔0.9 ต่อ block เดียวกับ `ShimmerBlock` เดิมที่ใช้ใน Landmark List
+
+### News Card (T102)
+- Purpose: 1 แถวต่อข่าว 1 ชิ้น สรุปข้อมูลให้กวาดตาอ่านเร็ว แตะแล้วเปิดอ่านเต็มผ่าน in-app browser
+- Layout: horizontal row card (ไม่ใช่ vertical hero เหมือน Landmark hero card เพราะข่าวเป็น continuous feed เรียงตามเวลา ไม่มีแนวคิด "อันดับ 1" ที่ควรเด่นกว่ารายการอื่นแบบ Landmark) — thumbnail สี่เหลี่ยมจัตุรัส 88×88pt ชิดซ้าย (`RADIUS.md`), เว้นระยะ `SPACING.sm` แล้วตามด้วยคอลัมน์ข้อความด้านขวาที่เหลือ (title, summary, date เรียงแนวตั้ง)
+- Card container: พื้นขาว, `RADIUS.lg`, `SHADOWS.sm`, border `#EFEFEF` 1px, padding `SPACING.sm` รอบทั้งใบ — สไตล์เดียวกับ `LandmarkCard`/`EntryListItem` ทุกประการเพื่อความ consistent กับ design language เดิม
+- Content:
+  - thumbnail: รูปปกข่าว (จาก `enclosure`/`media:content`/รูปแรกใน description) หรือ News Card Placeholder Cover ถ้าไม่มี/โหลดไม่สำเร็จ (`onError` fallback แบบเดียวกับ `LandmarkCard`'s `imgError` state)
+  - title: ตัวหนา 15pt, `COLORS.textPrimary`, ตัดที่ **2 บรรทัด** (`numberOfLines={2}`) ด้วย ellipsis
+  - summary: 13pt, `COLORS.textSecondary`, ตัดที่ **2 บรรทัด** (`numberOfLines={2}`) ด้วย ellipsis — เนื้อหาผ่านการตัด HTML tag ออกแล้วจาก parser ก่อนถึง component นี้
+  - date: 12pt, `COLORS.textSecondary`, format ไทยอ่านง่ายแบบเดียวกับ `EntryListItem` เดิม (เช่น "12 ก.ย. 2569") — ถ้าข่าวนั้นไม่มี `pubDate` ที่ parse ได้ ไม่แสดงบรรทัดวันที่เลย (เว้นว่างไป ไม่แสดงคำว่า "ไม่ระบุวันที่" เพื่อไม่ให้ดูเป็นข้อมูลผิดปกติ — ตำแหน่ง list ของรายการนี้ที่ถูกจัดไว้ท้ายสุดเป็นตัวสื่อความหมายอยู่แล้วว่าไม่มีวันที่อ้างอิง)
+- States:
+  - default: ตาม Content ด้านบน
+  - image-loading: thumbnail แสดง `ShimmerBlock` ขนาด 88×88 แทนระหว่างรอโหลดรูป (ถ้า loading เป็น async แยกจาก data fetch — ถ้ารูปโหลดพร้อม data ให้ข้าม state นี้ไปเลย)
+  - pressed: `PressableScale` ทั้งการ์ด (scale 0.96 + spring กลับ) พร้อม haptic light ก่อนเปิด in-app browser (ดู Micro-interaction ด้านล่าง)
+- Accessibility: การ์ดทั้งใบ `accessibilityRole="button"`, `accessibilityLabel="${title}, เผยแพร่ ${dateFormatted หรือละไว้ถ้าไม่มีวันที่}"`, `accessibilityHint="แตะเพื่อเปิดอ่านข่าวเต็มในเบราว์เซอร์ในแอป"` — ตาม pattern เดียวกับ `LandmarkCard` ที่มี `accessibilityRole="switch"` (T110)
+
+### News Card Placeholder Cover (T102, US-32 AC2)
+- Purpose: ภาพแทนเมื่อข่าวไม่มีรูปเลย หรือ URL รูปโหลดไม่สำเร็จ — ต้องไม่ใช่พื้นที่ว่าง/broken-image icon ของระบบ
+- แนวทาง: **ไม่ hotlink ภาพ stock ภายนอก** (ต่างจาก `FALLBACK_LANDMARK_IMAGE` ของ Landmark ที่ hotlink จาก Wikimedia ได้เพราะเป็นโดเมนที่ทีมตรวจสอบ/ควบคุมได้ในระดับหนึ่ง) เพราะข่าวมาจากโดเมนข่าวสารทั่วไปที่ทีมไม่ได้ curate ความน่าเชื่อถือของ asset ใดๆ ไว้ล่วงหน้า — ใช้ **placeholder ในแอปเอง** แทน: กล่องสี่เหลี่ยม 88×88 พื้นหลัง gradient อ่อนโทนเขียว (เช่น `COLORS.trackBg` → `#EFF7F3`) มีไอคอน emoji "📰" วางกึ่งกลาง
+- States: single state (แสดงแทน `<Image>` ทันทีที่ไม่มี image URL หรือ `onError` ทำงาน — เหมือนกลไก `imgError` ของ `LandmarkCard`)
+- Content: กล่อง placeholder ตามด้านบน ไม่มี text label ซ้อนทับ (ไอคอนสื่อความหมายเพียงพอในบริบทของการ์ดข่าวที่มี title ข้างๆ อยู่แล้ว)
+
+### Cache Indicator (T104)
+- Purpose: บอกผู้ใช้ว่ากำลังดูข่าวจาก cache (ไม่ใช่ข้อมูลสดล่าสุด) แบบไม่รบกวนการอ่าน list
+- ตำแหน่ง: `ListHeaderComponent` ของ NewsScreen List Container อยู่เหนือการ์ดข่าวใบแรก
+- States:
+  - visible: แสดงเมื่อรายการที่เห็นอยู่มาจาก cache และการ fetch สดล่าสุด (ถ้ามีการพยายาม) ไม่สำเร็จ หรือกำลังอยู่ระหว่าง background refresh ที่ยังไม่เสร็จ
+  - hidden: ไม่ render เมื่อรายการที่เห็นเป็นผลจาก fetch สดที่สำเร็จล่าสุดแล้ว (ไม่มี indicator ค้างเมื่อข้อมูล up-to-date จริง)
+- Content: แถบบาง (pill เต็มความกว้าง, พื้นหลัง `COLORS.trackBg`, `RADIUS.md`, padding `SPACING.xs`/`SPACING.sm`) ไอคอน 🕐 เล็กด้านซ้าย + ข้อความ 12pt `COLORS.textSecondary` "กำลังแสดงข่าวจากแคช • อัปเดตล่าสุด HH:mm" (format เวลาแบบ 24 ชม.ไทย) — ไม่มีปุ่ม action ในแถบนี้ (การ refresh ทำผ่าน pull-to-refresh gesture ของ list อยู่แล้ว ไม่ต้องมีปุ่มซ้ำซ้อน)
+
+### News Empty State (T103, US-32 AC1)
+- Purpose: feed ดึงสำเร็จแต่ไม่มีข่าวเลย (รายการว่างเปล่าจริง) — แยกจาก error state ให้ชัดเจนตามที่ AC ระบุ
+- แนวทาง: reuse `EmptyState.tsx` component เดิม (ใช้ซ้ำ ไม่สร้าง component ใหม่) เพราะ pattern เดียวกันเป๊ะกับ Empty State (Province)/(Stats) เดิม
+- States: single state
+- Content: ข้อความ "ยังไม่มีข่าวในขณะนี้" + ข้อความรองเล็กกว่า (ถ้าต้องการ) "ลากลงเพื่อรีเฟรช" เพื่อบอกใบ้วิธี retry เพราะหน้านี้ไม่มีปุ่ม action ชัดเจนเหมือน error state (ไม่มี actionLabel/onAction ส่งเข้า `EmptyState` — ปล่อยให้ pull-to-refresh gesture เป็นทางเดียวในการลองใหม่ สอดคล้องกับความหมายว่า "นี่ไม่ใช่ความผิดพลาด แค่ยังไม่มีข่าวตอนนี้")
+
+### News Error State (T103, US-32 AC4)
+- Purpose: RSS request ล้มเหลวจริง (network error, timeout, HTTP error, XML parse error) และไม่มี cache เดิมให้ fallback — ต้องมีทางลองใหม่ได้ทันทีในหน้าเดิม
+- แนวทาง: reuse pattern เดียวกับ `LandmarkFetchErrorState` ใน `LandmarkList.tsx` (ตามที่ T103 ระบุให้ reuse) — คือ่ข้อความสื่อความหมาย + ปุ่ม/ลิงก์ "ลองอีกครั้ง" ที่เรียก fetch logic เดิมซ้ำ ไม่ต้องออกจากแท็บ
+- States:
+  - default: แสดงเต็มพื้นที่ list (แทนที่ News Loading Skeleton/list) — ไอคอนกลางๆ (เช่น 📡 หรือ pin-off outline สีเทา ไม่ใช่ไอคอนสีแดง/อันตราย), ข้อความหลัก "ดึงข่าวไม่สำเร็จ ตรวจสอบการเชื่อมต่อเน็ตแล้วลองใหม่", ปุ่ม `PressableScale` พื้นเขียว `COLORS.accent`, ข้อความขาว "ลองอีกครั้ง", min-height 44pt, haptic light ตอนกด
+  - retrying: ปุ่ม "ลองอีกครั้ง" เปลี่ยนเป็น disabled + loading indicator เล็กในปุ่ม ระหว่างรอผล retry (เหมือน `LandmarkFetchErrorState` ที่มี `retrying` prop อยู่แล้ว)
+- Content: ตามที่ระบุใน `default` state ด้านบน — สีข้อความ `COLORS.textSecondary` (ไม่ใช่ `COLORS.danger`) ตามโทนที่กำหนดไว้ต้นหัวข้อนี้
+
+### News Open-Failure Toast (T106, T107)
+- Purpose: แจ้งผู้ใช้แบบไม่บล็อกเมื่อเปิดข่าวไม่ได้ (ลิงก์เสีย) หรือไม่มีเน็ตตอนกด — โดยไม่ crash และไม่เปิด browser ค้างเป็นหน้าขาว
+- แนวทาง: transient toast/snackbar ที่ลอยขึ้นจากด้านล่างจอ (เหนือ Bottom Tab Bar เล็กน้อย ไม่บังแท็บ) auto-dismiss เองหลัง ~2.5 วินาที ไม่ต้องกดปิดเอง (เทียบเท่ากับ toast "ผูกอีเมลสำเร็จ"/"บันทึกไม่สำเร็จ ลองใหม่อีกครั้ง" ที่มี pattern อยู่แล้วในเอกสารส่วน Landmark ด้านบน — ใช้ pattern เดียวกัน)
+- States:
+  - link-invalid: ข้อความ "ไม่สามารถเปิดข่าวนี้ได้"
+  - offline: ข้อความ "ต้องเชื่อมต่ออินเทอร์เน็ตเพื่ออ่านข่าวเต็ม"
+- Content: พื้นหลังเทาเข้ม/`#1A1A1A` โปร่งแสงเล็กน้อย (toast มาตรฐาน ไม่ใช่โทน amber/แดง เพราะเป็นข้อความแจ้งเหตุผลสั้นๆ ไม่ใช่ warning ที่ต้องเรียกร้องความสนใจสูง), ข้อความขาว 14pt กึ่งกลาง, `RADIUS.md`, ไม่มีปุ่ม action ในตัว toast เอง (ผู้ใช้แค่รับทราบแล้ว list ข่าวยังอยู่ที่เดิมให้ลองข่าวอื่นได้)
+
+---
+
+## Micro-interactions & Haptics สรุป (รอบ Bottom Tab Navigation & ข่าว)
+- แตะสลับแท็บ (Bottom Tab Bar): `Haptics.impactAsync(Light)` เมื่อสลับไปแท็บใหม่สำเร็จเท่านั้น (ไม่ trigger ซ้ำถ้าแตะแท็บที่ active อยู่แล้ว)
+- ลาก pull-to-refresh จนถึง threshold: `Haptics.impactAsync(Light)` ทันทีที่ระบบเริ่ม fetch จริง (ไม่ต้องรอผลลัพธ์)
+- แตะ News Card: `PressableScale` (scale 0.96, spring `damping:12, stiffness:150` เหมือนมาตรฐานเดิมของแอป) + `Haptics.impactAsync(Light)` ทันทีตอนกด ก่อน `openBrowserAsync` เพื่อลดความรู้สึกหน่วงระหว่างรอ native modal เปิด
+- แตะปุ่ม "ลองอีกครั้ง" ใน News Error State: haptic light เหมือนปุ่ม CTA อื่นในแอป (`PressableScale`/`EmptyState` เดิม)
+
+## Thumb-zone & Accessibility สรุป (รอบ Bottom Tab Navigation & ข่าว)
+- Bottom Tab Bar เป็นตัวอย่าง thumb-zone ที่ดีอยู่แล้วโดยธรรมชาติของ pattern (อยู่ล่างสุดของจอเสมอ) — ไม่ต้องออกแบบเพิ่ม
+- News Card ทั้งใบเป็น touch target เดียว (ไม่ใช่แค่ thumbnail หรือแค่ title) สูง ≥ 88pt (สูงกว่าเกณฑ์ 44pt ขั้นต่ำอยู่แล้วโดยธรรมชาติของ layout)
+- ปุ่ม "ลองอีกครั้ง" ใน News Error State และปุ่มในทุก state อื่นของหน้านี้ยึด min-height 44pt ตามมาตรฐานเดิมของแอปเสมอ
+- Tab bar accessibility label ภาษาไทยชัดเจนตามที่ระบุใน component ด้านบน, News Card accessibility label รวม title + วันที่ (ถ้ามี) ให้ screen reader อ่านได้ครบในครั้งเดียวโดยไม่ต้องไล่อ่านทีละ sub-element
+
+---
+
+## ข้อเสนอแนะที่อาจขัดกับ requirement (รอบ Bottom Tab Navigation & ข่าว)
+
+- ประเด็น E: requirement (T106/T107, US-31 AC3–4) ระบุเพียงว่าต้อง "แสดงข้อความแจ้ง" เมื่อเปิดข่าวไม่ได้/ไม่มีเน็ต แต่ไม่ได้ระบุรูปแบบ UI ที่แน่นอนว่าเป็น toast ชั่วคราว, inline banner ค้างในหน้า, หรือ modal alert — เอกสารนี้เลือกออกแบบเป็น **transient toast auto-dismiss** (ทางเลือก A) ด้วยเหตุผลว่าไม่บล็อกผู้ใช้จากการอ่านข่าวอื่นต่อและสอดคล้องกับความถี่ที่ค่อนข้างต่ำของ edge case นี้ (ลิงก์เสีย/ไม่มีเน็ต ไม่ใช่ทุกครั้งที่กด)
+  - ทางเลือก A (ตามที่ spec นี้ออกแบบ): transient toast ~2.5 วินาทีแล้วหายเอง ไม่มีปุ่มปิด ไม่บล็อก interaction อื่น
+  - ทางเลือก B: inline banner ค้างอยู่ด้านบนของ list (คล้าย Cache Indicator) จนกว่าผู้ใช้จะแตะข่าวอื่นสำเร็จหรือปิดเอง — เห็นชัดกว่าถ้าผู้ใช้พลาดดู toast ที่หายเร็ว แต่เพิ่ม state ค้างในหน้าจอที่ต้อง manage เพิ่ม (ต้อง clear เมื่อไหร่ ฯลฯ)
+  - เอกสารนี้เลือกทางเลือก A เป็นดีฟอลต์เพื่อให้ programmer เริ่มงานได้ทันที แต่ระบุไว้ให้ PM ทราบเผื่อเห็นว่า toast สั้นเกินไปจนผู้ใช้อาจพลาดข้อความ (โดยเฉพาะกรณี "ไม่มีเน็ต" ที่อาจอยากให้ผู้ใช้เห็นชัดกว่านี้) และต้องการเปลี่ยนเป็นทางเลือก B แทน
+
+- ประเด็น F (ไม่ใช่ conflict แต่เป็นข้อสังเกตทางเทคนิคส่งต่อ programmer): requirement ไม่ได้พูดถึงพฤติกรรมของ Bottom Tab Bar ระหว่างอยู่ใน AddEntryScreen (full-screen push จากแท็บ "แผนที่") — ตาม native behavior มาตรฐานของ `@react-navigation/bottom-tabs` ซ้อนกับ `native-stack` ปกติแล้ว tab bar จะยังคงแสดงอยู่ระหว่าง stack screen ใดๆ ที่ push ทับ เว้นแต่ตั้ง `tabBarStyle: { display: 'none' }` ใน `screenOptions` ของ screen นั้นโดยเฉพาะ — เอกสารนี้ไม่บังคับให้ซ่อน/ไม่ซ่อน tab bar ตอนอยู่ใน AddEntry เพราะไม่มี AC ใดกำหนดไว้ และไม่กระทบ UX หลักไม่ว่าจะเลือกทางใด ปล่อยเป็นดุลยพินิจของ programmer ตาม default behavior ของ library เพื่อลด effort ที่ไม่จำเป็น
+
+- ประเด็น G (ไม่ใช่ conflict แต่เป็นข้อสังเกตเรื่อง asset reliability ส่งต่อ programmer/PM): ต่างจาก `FALLBACK_LANDMARK_IMAGE` ที่ทีมเลือก hotlink ภาพจาก Wikimedia Commons ได้เพราะเป็นโดเมนที่ตรวจสอบแล้วว่าเสถียรพอสมควร เอกสารนี้จงใจ**ไม่**เสนอ hotlink ภาพ placeholder จากภายนอกสำหรับข่าว (ดู News Card Placeholder Cover) เพราะไม่มีโดเมนที่ทีม curate ไว้ล่วงหน้าสำหรับ asset ประเภทนี้ และการ hotlink จากแหล่งใหม่ที่ไม่ได้ตรวจสอบเพิ่มความเสี่ยงเรื่อง broken link/เนื้อหาที่เปลี่ยนได้โดยไม่แจ้งล่วงหน้า จึงเลือก in-app icon placeholder แทนซึ่งไม่ต้องพึ่งเน็ตเลย — เป็นดุลยพินิจ UIUX ในกรอบเดิม ไม่ต้องรอ PM ตัดสินใจ แต่ระบุไว้เผื่อ PM ต้องการภาพ placeholder ที่ "ดูเป็นรูปจริง" มากกว่า icon (เช่นภาพ Thailand-tourism stock 1 ภาพที่ทีมเลือกเองและ bundle ไว้ใน assets ของแอปแทนการ hotlink — ทางเลือกนี้ทำได้เช่นกันถ้าต้องการ แต่เพิ่ม asset size ของ app bundle เล็กน้อย)
+
+---
+
+# ส่วนเพิ่มเติม: Advanced UI/UX v5 (ProvinceDetailScreen container + AddEntryScreen form)
+
+หมายเหตุขอบเขต: รอบก่อนหน้า (v2–v4 + รอบ Bottom Tab/ข่าว) ยกระดับ `LandmarkList`/`LandmarkCard`, `HomeScreen`, `StatsScreen`, `SettingsScreen`, `NewsScreen` ไปแล้ว แต่ยังเหลือ 2 จุดที่ค้างอยู่ที่ระดับ Prototype เดิม (border เทาแบน `#D9D9D9`, radius 8pt คงที่, ไม่มีเงา, ปุ่มเป็น `Pressable` ธรรมดาไม่มี bounce/haptic, skeleton เป็นบล็อกสีเทานิ่งแทน shimmer): **ProvinceDetailScreen** (container/header/CTA/skeleton — ส่วนที่ไม่ใช่ `LandmarkList`) และ **AddEntryScreen** (ฟอร์มทั้งหน้ารวม field group, chip, ปุ่ม) รอบนี้ปิด gap นี้โดยใช้ token ชุดเดิมจาก `src/theme.ts` (`SPACING`/`RADIUS`/`SHADOWS`/`COLORS`) และ component เดิม (`PressableScale`, `ShimmerBlock`) ทั้งหมด — ไม่เพิ่ม dependency ใหม่ ไม่เปลี่ยน logic/state/validation ใดๆ
+
+## Layout & Design Tokens
+
+### ProvinceDetailScreen
+- Header: back button เปลี่ยนจากข้อความ "‹ กลับ" ล้วนเป็นปุ่มวงกลม (`RADIUS.full`, 40×40pt, พื้นหลัง `#F2F2F2`, hitSlop 8) ครอบด้วย `PressableScale` haptic light — เพิ่ม tap target ให้ชัดเจนขึ้นแบบ thumb-friendly โดยไม่เปลี่ยนตำแหน่ง/การนำทาง
+- เพิ่มเส้นแบ่งบางๆ ใต้ header (`borderBottomWidth:1, borderBottomColor:'#F0F0F0'`) แทนพื้นที่ว่างเฉยๆ เพื่อแยก header ออกจาก scroll body ให้มีมิติมากขึ้นแบบเบาๆ (ไม่ใช้เงาเพราะ header ไม่ลอย)
+- เพิ่ม section label เล็ก "บันทึกทั้งหมด (N)" เหนือ Entry List (แสดงเฉพาะตอน success + length > 0) ให้ผู้ใช้ scan ได้เร็วว่ามีกี่รายการ โดยไม่กระทบ AC ใดของ US-5 (เป็นข้อความเสริม ไม่ใช่ state ใหม่)
+- ปุ่ม "+ เพิ่มบันทึกใหม่": ยกเป็น elevated CTA (`RADIUS.lg`, `SHADOWS.md`, พื้นหลัง `COLORS.accent`) ครอบด้วย `PressableScale` haptic medium (เทียบเท่าน้ำหนักของ action ที่นำไปสู่ฟอร์มใหม่ ตามระดับเดียวกับ "กดเช็คอินสถานที่สำเร็จ" ใน SKILL.md 3.2) — ตำแหน่ง/เงื่อนไขการแสดงผล (เฉพาะเมื่อมี entry อยู่แล้ว) เหมือนเดิมทุกประการ
+- Skeleton (loading state ของ Entry List): แทนที่ `View` สีเทาแบนนิ่งด้วย `ShimmerBlock` ขนาดเท่าแถวจริง (สูง 56pt + padding เท่า `EntryListItem`) ให้ตรงตามกฎ SKILL.md 4.1 (ต้องไม่ใช้บล็อกสีเทานิ่ง + ขนาดต้องตรงของจริง 100%)
+
+### AddEntryScreen
+- Header: back button วงกลมแบบเดียวกับ ProvinceDetailScreen (label "ยกเลิก" ยังคงเป็นข้อความเดิมภายในปุ่ม แต่ยกระดับเป็น pill `PressableScale` พื้นหลัง `#F2F2F2` แทนข้อความลอยเฉยๆ) — เส้นแบ่งใต้ header เหมือนกัน
+- Field group card: จัดกลุ่มฟิลด์เป็น 2 การ์ดลอย (`SHADOWS.sm`, `RADIUS.lg`, พื้นหลังขาว, padding `SPACING.md`, คั่นด้วย `SPACING.lg`) แทนการเรียง label/input ต่อกันแบนราบทั้งหน้า:
+  1. การ์ด "ข้อมูลหลัก": วันที่ (required) + ชื่อสถานที่ (required) + ช่องค้นหาสถานที่/chip ยืนยัน
+  2. การ์ด "รายละเอียดเพิ่มเติม": บันทึกความทรงจำ, รูปภาพ, แท็ก, เช็คอินสถานที่ (ถ้ามี)
+- Text input / date input: `RADIUS.md` (เดิม 8pt คงที่), border สีเทาอ่อนตอน default, เปลี่ยนเป็น `COLORS.accent` + `SHADOWS.sm` ตอน focus (ผูก `onFocus`/`onBlur` state ต่อฟิลด์) ให้ผู้ใช้เห็นชัดว่ากำลังพิมพ์ฟิลด์ไหนอยู่ — ไม่เปลี่ยนพฤติกรรม validation/error message ใดๆ (inline error ใต้ฟิลด์ยังคงเดิมทุกประการ)
+- Landmark chip ("เช็คอินสถานที่"): ปรับเป็น pill ชัดเจนขึ้น (`RADIUS.full`, `SPACING.sm` padding แนวนอน) ครอบด้วย `PressableScale` haptic light ต่อชิป แทน `Pressable` ธรรมดา
+- ปุ่ม "บันทึก"/"บันทึกการแก้ไข": elevated CTA (`SHADOWS.md`, `RADIUS.lg`) ครอบด้วย `PressableScale` haptic medium ตอนกด และเพิ่ม `Haptics.notificationAsync(Success)` ทันทีหลังบันทึกสำเร็จจริง (ก่อน `navigation.goBack()`) — ให้ความรู้สึกฉลองบันทึกสำเร็จ สอดคล้องกับรูปแบบเดิมที่แอปใช้กับ Province Master badge; ตอน `saving=true` ยังคงแสดง `ActivityIndicator` ในปุ่มเหมือนเดิม (ไม่ใช่ layout ที่มี "รูปทรงชัดเจน" แบบ skeleton rule ข้อ 4.1 จึงไม่ต้องเปลี่ยนเป็น shimmer)
+- ปุ่ม "ลบบันทึกนี้": ครอบด้วย `PressableScale` haptic light (คงสี/ตำแหน่ง/`Alert.alert` confirm เดิมทุกประการ — ไม่ใช้ haptic แรงกว่านี้เพราะเป็นแค่จุดเปิด confirm dialog ยังไม่ใช่การลบจริง)
+
+## States (ไม่มี state ใหม่เพิ่มจาก AC เดิม — ระบุเฉพาะจุดที่เปลี่ยนการแสดงผลของ state ที่มีอยู่แล้ว)
+- Loading (ProvinceDetailScreen Entry List): shimmer แทนบล็อกเทานิ่ง (ดูด้านบน)
+- Focus (AddEntryScreen inputs): เพิ่ม visual state ใหม่ระดับ micro-UI เท่านั้น (border+shadow) ไม่ใช่ state ทางธุรกิจ ไม่กระทบ validation/AC ใดๆ
+- Success (AddEntryScreen save): เพิ่ม haptic ฉลองก่อนปิดฟอร์ม (ดูด้านบน) — ระยะเวลา/การ navigate กลับเหมือนเดิมทุกประการ
+- Error/Empty/Saving state อื่นๆ ทั้งหมด: ไม่เปลี่ยนแปลงจาก spec เดิม (T21 Empty State, validation-error, saving disabled)
+
+## Micro-interactions & Haptics สรุป (รอบนี้)
+- ปุ่มกลับ/ยกเลิก (ทั้ง 2 หน้า): `PressableScale` haptic light
+- CTA "+ เพิ่มบันทึกใหม่" (ProvinceDetail): `PressableScale` haptic medium
+- Landmark chip (AddEntry): `PressableScale` haptic light ต่อชิป
+- ปุ่ม "บันทึก"/"บันทึกการแก้ไข": `PressableScale` haptic medium ตอนกด + `Haptics.notificationAsync(Success)` ตอนบันทึกสำเร็จจริง
+- ปุ่ม "ลบบันทึกนี้": `PressableScale` haptic light
+
+## Thumb-zone & Accessibility
+- ปุ่มกลับวงกลมทั้ง 2 หน้า: 40×40pt + hitSlop 8 (รวม effective tap target ≥ 44pt ตามเกณฑ์ขั้นต่ำ) พร้อม `accessibilityRole="button"` + `accessibilityLabel` ภาษาไทย ("กลับ" / "ยกเลิก")
+- CTA หลักทั้ง 2 หน้า (`+ เพิ่มบันทึกใหม่`, `บันทึก`) อยู่ตำแหน่งเดิม (ท้ายเนื้อหาที่ scroll ถึง/บริเวณล่างของฟอร์ม) ซึ่งอยู่ใน thumb zone อยู่แล้วตาม layout เดิม — รอบนี้ไม่ย้ายตำแหน่ง เพิ่มแค่มิติ/bounce/haptic
+- Landmark chip แต่ละอันคง `minHeight` ให้ไม่ต่ำกว่า 32pt ผลรวมกับ padding แนวตั้งให้ tap ได้สะดวกแม้เป็นชิปเล็ก (ยังต่ำกว่าเกณฑ์ 44pt ของปุ่มหลัก แต่เป็น pattern เดียวกับ chip อื่นทั้งแอปที่ยอมรับแล้วในรอบก่อนๆ เพราะอยู่เป็นกลุ่มชิดกันหลายอันในแถวเดียว)
+
+## ข้อเสนอแนะที่อาจขัดกับ requirement (รอบนี้)
+ไม่มี — รอบนี้เป็นการปรับ visual/micro-interaction ล้วนๆ บน 2 หน้าที่ logic/state/validation คงเดิมทั้งหมด ไม่มีจุดใดต้องให้ PM ตัดสินใจเพิ่ม
+
+## Consistency fix เพิ่มเติม (พบระหว่างตรวจรอบนี้)
+- `TagSelector.tsx` (ใช้ใน AddEntryScreen การ์ด "รายละเอียดเพิ่มเติม"): เดิมยังเป็น `Pressable` ธรรมดา + hardcoded spacing ไม่ผ่าน token — เปลี่ยนเป็น `PressableScale` haptic light ทุกชิป/ปุ่มเพิ่มแท็ก และเปลี่ยน spacing/radius ทั้งหมดให้อ้างอิง `SPACING`/`RADIUS` แทน
+- `SettingsScreen.tsx`: back button เดิมเป็นข้อความลอย (`Pressable` ธรรมดา) ไม่ตรงกับ pattern ปุ่มกลับวงกลมที่ ProvinceDetailScreen/AddEntryScreen ใช้แล้ว — ปรับให้เป็น pattern เดียวกัน (`PressableScale` haptic light, pill background, เส้นแบ่งใต้ header)
+- ตรวจสอบเพิ่มเติมพบ hardcoded `borderRadius: 8`/`#D9D9D9` หลงเหลืออยู่บางจุดใน `PhotoPicker.tsx`, `ProvinceMasterBadge.tsx`, `SearchPlaceField.tsx`, `DataLossWarningModal.tsx` (ค่าตัวเลขเท่ากับ `RADIUS.sm`/border สีเทาเริ่มต้นอยู่แล้ว ไม่ต่างจาก token ทางสายตา) — เป็นแค่ไม่ได้ reference ชื่อ token โดยตรง ไม่ใช่ความไม่สอดคล้องด้าน UX ที่มองเห็นได้ ปล่อยไว้เป็น tech-debt เล็กน้อยของรอบถัดไปถ้ามีเวลา ไม่กระทบ output ของรอบนี้
+
+---
+
+# ส่วนเพิ่มเติม: Motion & Animation Upgrade (US-34, รอบ 14)
+
+> อ้างอิง: US-34 (docs/requirements.md), T118-T123 (docs/tasks.md), `.claude/skills/advanced-mobile-uiux/SKILL.md` §3 (Micro-interactions)
+> ขอบเขต: เอกสารนี้กำหนดค่าที่ programmer เอาไปเขียนโค้ดตรงได้ทันที ไม่เปลี่ยน information architecture / สี / data model ตาม Out of Scope ของ US-34
+
+## หลักการร่วม: Reduce Motion
+
+ทุก animation ที่ระบุในเอกสารนี้ (screen transition, entrance animation, press feedback แบบ enhanced) ต้อง check `AccessibilityInfo.isReduceMotionEnabled()` ก่อนเล่นเสมอ:
+
+- เรียกครั้งเดียวตอน mount ระดับ root (เช่นใน `AppNavigator.tsx` หรือ hook กลาง `useReduceMotion()`) เก็บผลใน state/context แล้ว subscribe event `AccessibilityInfo.addEventListener('reduceMotionChanged', ...)` เพื่ออัปเดตถ้าผู้ใช้เปลี่ยนค่าระหว่างใช้แอป
+- ถ้า `true`: screen transition ให้ fallback เป็น cross-fade duration 120ms (ไม่ slide/scale), entrance animation ของ list ให้ตัด stagger ออกทั้งหมดและ opacity เข้า 0→1 ทันทีในเฟรมเดียว (หรือข้ามไปเลยก็ได้), press feedback enhanced ให้ตัด shadow-depress effect ออกเหลือแค่ scale เดิม 0.96 (ไม่เพิ่ม scale ให้แรงขึ้น) เพื่อลดการเคลื่อนไหวที่อาจกระตุ้นอาการเวียนศีรษะ
+- นี่คือข้อกำหนดบังคับของทุก component ในหัวข้อ 1-3 ด้านล่าง ไม่ใช่ optional enhancement
+
+---
+
+## 1. Screen Transition (`AppNavigator.tsx`)
+
+โครงสร้างปัจจุบันมี 2 nested native-stack (`MapStack`, `NewsStack`) ภายใต้ bottom-tabs — ยืนยันว่า **ควบคุมผ่าน native-stack `screenOptions`/`animation` prop ได้จริง** โดยไม่ต้องเพิ่มไลบรารีใหม่ (`@react-navigation/native-stack` รองรับ prop `animation` บน iOS/Android ผ่าน native screen transition อยู่แล้ว, ส่วน bottom-tabs ใช้ custom cross-fade ผ่าน `tabBarStyle`/screen wrapper ด้วย reanimated ที่มีอยู่แล้วในโปรเจกต์)
+
+### 1.1 เปิด ProvinceDetailScreen (push จาก HomeScreen)
+- Transition: `slide_from_right`
+- ตั้งค่าใน `MapStack.Screen` (name="ProvinceDetail") ผ่าน `options={{ animation: 'slide_from_right', animationDuration: 280 }}`
+- Easing: native default ของ native-stack (`easeInEaseOut` ฝั่ง iOS, standard Android Activity transition) — ไม่ต้อง custom easing เพิ่มเพราะ native-stack ใช้ native driver ของแพลตฟอร์มอยู่แล้ว ให้ความรู้สึกเป็น native จริง
+- States: `default` (อยู่ที่ HomeScreen) → `animating` (280ms slide, กดข้ามได้ด้วยการแตะปุ่ม/gesture back ทันทีโดยไม่ต้องรอ, native-stack รองรับ interrupt โดยธรรมชาติ) → `settled` (ProvinceDetailScreen อยู่นิ่ง)
+- Back (pop): ใช้ transition เดียวกันย้อนกลับ (native-stack จัดการอัตโนมัติเมื่อกำหนด `animation` ที่ screen)
+
+### 1.2 เปิด AddEntryScreen (push จาก ProvinceDetailScreen)
+- Transition: `slide_from_bottom` (สื่อความหมายว่าเป็น "โมดัลเพิ่มข้อมูลใหม่" ต่างจากการเข้าไปดูรายละเอียดที่ใช้ slide_from_right — ช่วยให้ผู้ใช้แยกความรู้สึกระหว่าง "navigate deeper" กับ "เปิดฟอร์มชั่วคราว" ได้โดยสัญชาตญาณ)
+- ตั้งค่าใน `MapStack.Screen` (name="AddEntry") ผ่าน `options={{ animation: 'slide_from_bottom', animationDuration: 300, presentation: 'modal' }}`
+- States: `default` → `animating` (300ms, กดปุ่ม "ยกเลิก"/gesture-dismiss ระหว่าง animation ได้ทันที) → `settled`
+
+### 1.3 สลับแท็บ "แผนที่" / "ข่าว"
+- bottom-tabs (`@react-navigation/bottom-tabs`) ไม่มี built-in cross-fade prop ที่ปรับ duration ได้ตรงๆ เหมือน native-stack ดังนั้นให้ implement cross-fade เองด้วย `react-native-reanimated` ที่มีอยู่แล้ว: wrap เนื้อหาของแต่ละ `Tab.Screen` (หรือใช้ custom `tabBar`/screen listener) ให้ opacity animate จาก 0 → 1 ด้วย `withTiming(1, { duration: 180 })` ทุกครั้งที่ tab นั้น gain focus (ใช้ `useIsFocused()` หรือ `useFocusEffect` เป็น trigger)
+- ค่าที่แน่นอน: fade-out ของแท็บเดิม 100ms (opacity 1→0.3, ไม่ต้อง 0 เต็มเพราะ tab ถูกสลับ mount/unmount visibility อยู่แล้วโดย navigator) ตามด้วย fade-in ของแท็บใหม่ 180ms (opacity →1) — รวมความรู้สึก transition ~180-220ms ไม่ควรเกิน 250ms เพราะเป็นจุดที่ผู้ใช้กดถี่บ่อย (thumb-zone bottom tab) ความหน่วงจะรู้สึกน่ารำคาญถ้ายาวกว่านี้
+- Haptic: คงพฤติกรรมเดิม (`Haptics.impactAsync(Light)` เมื่อกดแท็บที่ยังไม่ focus) ไม่เปลี่ยน — motion เพิ่มเป็นแค่ visual layer ทับของเดิม
+- States: `default` (แท็บ A active) → `animating` (fade cross-over 180-220ms, กดแท็บอื่นซ้ำระหว่างนี้ต้อง interrupt ทันทีไม่ค้างคิว) → `settled` (แท็บ B active, เนื้อหาโหลด/แสดงตามปกติ)
+
+---
+
+## 2. List/Card Entrance Animation
+
+รูปแบบร่วม: **fade (opacity 0→1) + translateY เล็กน้อย (12pt → 0)** ใช้ `react-native-reanimated` (`useAnimatedStyle` + `withDelay`/`withTiming`) ต่อรายการ ไม่ใช่ `LayoutAnimation` ของ RN core (เพื่อความสม่ำเสมอกับ `PressableScale` ที่ใช้ reanimated อยู่แล้ว)
+
+ค่าพารามิเตอร์มาตรฐาน (ใช้ร่วมกันทุกจุด เว้นแต่ระบุเป็นอย่างอื่น):
+- translateY เริ่มต้น: 12pt (ตาม 8pt grid: ใกล้เคียง `sm` spacing เพื่อไม่ให้ระยะเคลื่อนไหวมากเกินจนรู้สึกสั่นไหว)
+- Duration ต่อ item: 260ms, easing `Easing.out(Easing.cubic)`
+- Stagger delay: `index * 40ms` โดย **cap ที่ 320ms** (เทียบเท่า item ที่ 8 เป็นต้นไปทั้งหมดเริ่มพร้อมกันที่ 320ms ไม่ต้องรอ delay สะสมไปเรื่อยๆ) — ป้องกันไม่ให้รายการท้ายๆ ของ list ยาวต้องรอ animation หลายวินาทีก่อนเห็น ซึ่งขัดกับ AC ที่ห้ามบังคับผู้ใช้รอ
+- Interrupt: ผู้ใช้ scroll/แตะรายการระหว่าง entrance animation กำลังเล่นได้ทันที (animation เป็นแค่ opacity/transform overlay ไม่ block touch handler ของ item เดิม, ต้องไม่ใช้ `pointerEvents="none"` ระหว่างเล่น)
+- เล่นเฉพาะตอน **initial render ครั้งแรกหลังข้อมูลโหลดเสร็จ** ของแต่ละ mount (ไม่เล่นซ้ำตอน re-render จาก state อื่นที่ไม่เกี่ยวกับการโหลดข้อมูลใหม่ เช่นไม่เล่นซ้ำตอนกดเช็คอินแล้ว re-render item เดิม) — ใช้ ref แฟลก `hasAnimatedRef` per list-instance กันการเล่นซ้ำ
+
+### 2.1 `LandmarkList.tsx` (รายการ Landmark ในหน้าจังหวัด)
+- Component ที่ได้รับ spec ใหม่: `LandmarkList` (ครอบ `LandmarkCard` แต่ละใบ)
+- Apply ตามค่ามาตรฐานด้านบนทั้งหมด (translateY 12→0, 260ms, stagger 40ms/cap 320ms)
+- States: `loading` (shimmer skeleton ตามมาตรฐานเดิม ไม่เปลี่ยน) → `entrance-animating` (การ์ดทยอย fade+slide เข้า) → `settled` (การ์ดทั้งหมด opacity 1 / translateY 0, กดเช็คอิน/แตะดูรายละเอียดได้ปกติแม้ยังอยู่ระหว่าง entrance ของการ์ดใบอื่น)
+
+### 2.2 List ข่าวใน `NewsScreen.tsx`
+- Component: news list container ที่ครอบ `NewsCard`
+- Apply ตามค่ามาตรฐาน เหมือน 2.1
+- ข้อควรระวังเพิ่ม: ต้องไม่ผูก entrance animation กับ state ของการโหลดรูปภาพ (US-33/placeholder) — animation ของการ์ดต้องเล่นทันทีที่ list metadata (title/summary/date) พร้อม ไม่ต้องรอรูปโหลดเสร็จ เพื่อคง AC เดิมที่ title/summary ต้องขึ้นทันที
+
+### 2.3 Timeline entry ในหน้าสถิติ (`Stats Timeline`, T26)
+- Component: Stats Timeline entry item (ดู component เดิมชื่อ "Stats Timeline" ใน design-spec.md)
+- Apply ตามค่ามาตรฐาน เหมือน 2.1 แต่ทิศทาง translateY แนะนำให้เหมือนเดิม (12pt จากด้านล่างขึ้น) เพื่อความสอดคล้องกับทิศทางการอ่าน timeline แนวตั้ง (เรียงจากบนลงล่าง เข้าใหม่จากล่างขึ้นแบบเดียวกับ list อื่น ไม่ต้องคิดทิศทางแยก)
+
+### 2.4 Home — Province Tile 3D Map (76 tiles): **ไม่รวมใน scope entrance animation รอบนี้**
+เหตุผล: เอกสาร design-spec.md เดิม (v1) เคยระบุความเสี่ยง performance ของการ animate tile จำนวนมากพร้อมกันบน 3D map component (`ProvinceTile3D.tsx` ผ่าน `Map3D.tsx`) ไว้แล้ว — การเพิ่ม fade+translateY แบบ staggered ให้ 76 tile พร้อมกันตอนเปิด HomeScreen มีความเสี่ยงจริงที่จะทำให้ frame drop/jank บนอุปกรณ์ทั่วไป ซึ่งขัดกับ AC ของ US-34 เองที่ระบุชัดว่า "ต้องไม่ทำให้แอปรู้สึกหน่วง/ค้าง" ดังนั้นเพื่อไม่ละเมิด AC ข้อนี้ ขอไม่ใส่ entrance animation ระดับ per-tile ให้ 3D map ในรอบนี้ (US-34 AC2 ระบุ list ที่ต้องมี entrance animation ไว้ชัดเจนแค่ 3 จุด คือ Landmark list/News list/Stats timeline เท่านั้น ไม่รวม Home map จึงไม่ถือว่าขาด AC) — ดูหัวข้อ "ข้อเสนอแนะที่อาจขัดกับ requirement" ท้ายไฟล์สำหรับทางเลือกเสริมถ้า PM ต้องการ motion บน Home ด้วย
+
+---
+
+## 3. Press Feedback ที่ชัดเจนขึ้น (Enhanced PressableScale)
+
+Baseline ปัจจุบัน (`PressableScale.tsx`): scale 0.96 on press-in, spring กลับ (`damping: 12, stiffness: 150`) + haptic — ตาม SKILL.md §3.1/3.2 เดิม ทีมยืนยันแล้วว่าค่านี้ "เบาไป" จึงต้อง enhance ดังนี้ (คงไลบรารีเดิม `react-native-reanimated`, ไม่เพิ่ม prop ใหม่ที่กระทบ API เดิมของ component อื่นที่ import อยู่ — เพิ่มเป็น opt-in prop ใหม่)
+
+### 3.1 ค่าพารามิเตอร์ใหม่
+เพิ่ม prop ใหม่ `variant?: 'default' | 'emphasized'` ใน `PressableScaleProps` (default = `'default'` เพื่อไม่กระทบ caller เดิมที่ไม่ระบุ, ป้องกัน regression ตาม T122):
+
+- **scale**: จาก 0.96 → **0.93** เมื่อ `variant="emphasized"` (deeper press, สังเกตเห็นชัดกว่าเดิมอย่างมีนัยสำคัญแต่ยังไม่บิดเบี้ยวจนแปลก)
+- **shadow-depress effect** (ของใหม่ที่ baseline ไม่มี): ระหว่างกดค้าง ให้ animate `shadowOpacity`/`elevation` ของ container ลดลงพร้อมกับ scale เพื่อสื่อความรู้สึก "การ์ดถูกกดจมลงไปในพื้นผิว" — ใช้ค่าเงาเดิมจาก SHADOWS token (`SKILL.md` §1.2) เป็นฐาน:
+  - จาก `SHADOWS.md` (shadowOpacity 0.08, shadowRadius 14, elevation 4, offset y:6) → ตอนกด (press-in) ลดเหลือ shadowOpacity **0.03**, shadowRadius **6**, elevation **1**, offset y **2** (เหมือนเงาแบนราบลงจริง)
+  - Animate ด้วย `withSpring` **ชุดเดียวกับ scale** (`damping: 12, stiffness: 150`) เพื่อให้ scale กับ shadow กลับคืนพร้อมกัน sync กันสนิท ไม่ใช้ timing แยกที่จะทำให้ดู "หลุด" กัน
+  - หมายเหตุ implementation: shadow property (`shadowOpacity`, `shadowRadius`, `elevation`) ไม่ animate ผ่าน native driver ได้ตรงๆ บน Android (elevation ไม่ smooth-interpolate ได้ดีเท่า iOS shadow) — ให้ programmer ประเมินว่าใช้ interpolate shadowOpacity/shadowRadius แบบ JS-driven เฉพาะ iOS และบน Android fallback เป็นแค่ scale-only effect (คง `elevation` คงที่) เพื่อไม่เกิด jank ตาม AC "ต้อง smooth ไม่ jank"
+- **haptic**: คงเดิม (`Light`/`Medium` ตาม caller เดิม) ไม่เปลี่ยนความถี่/timing ของ haptic เพราะ AC ไม่ได้ขอเปลี่ยนจุดนี้ การเปลี่ยนที่ขอคือ "visual feedback"
+
+### 3.2 จุดที่ apply `variant="emphasized"`
+- ปุ่มเช็คอินใน `LandmarkCard.tsx`
+- การ์ด Landmark (ทั้งใบการ์ดใน `LandmarkCard.tsx`/`LandmarkList.tsx`)
+- การ์ดข่าวใน `NewsCard.tsx`
+- ปุ่ม "+ เพิ่มบันทึกใหม่" (ปุ่ม CTA หลักใน ProvinceDetailScreen ที่ไปเปิด AddEntryScreen)
+
+จุดอื่นที่ใช้ `PressableScale` อยู่แล้วแต่ไม่ได้ระบุใน AC ของ US-34 (เช่นปุ่มรองใน Settings, EmailLinkForm) ให้คง `variant="default"` (behavior เดิม 0.96 ไม่มี shadow-depress) ไม่ต้องเปลี่ยน เพื่อไม่ขยาย scope เกินที่ requirement ขอ
+
+### 3.3 States
+- `default`: scale 1, shadow ตาม SHADOWS.md ปกติ
+- `pressing` (press-in จนถึงปล่อยนิ้ว): scale 0.93, shadow ลดตาม 3.1, haptic ยิงตอน `onPress` (ตำแหน่งเดิม ไม่เปลี่ยน)
+- `settling` (หลังปล่อยนิ้ว, spring กำลังคืนค่า): scale/shadow กำลัง interpolate กลับ 1/ปกติ — ต้อง**กดซ้ำ/interrupt ระหว่าง settling ได้ทันที** (spring ของ reanimated รองรับการ re-trigger ระหว่าง animate อยู่แล้วโดยธรรมชาติ ไม่ต้องรอ settle ก่อน)
+- `settled`: กลับสู่ default
+
+---
+
+## ข้อเสนอแนะที่อาจขัดกับ requirement
+
+- **ประเด็น**: US-34 AC2 ระบุ list ที่ต้องมี entrance animation ไว้ 3 จุด (Landmark list, News list, Stats timeline) ไม่ได้รวม Home 3D map (76 tiles) แต่ผู้ใช้บ่นภาพรวมว่า "ทั้งแอปรู้สึกเหมือนเดิม" ซึ่ง Home คือหน้าแรกที่ผู้ใช้เห็นทุกครั้งที่เปิดแอป ถ้าไม่มี motion อะไรเลยบนหน้านี้ ผู้ใช้อาจยังรู้สึกว่า "หน้าแรกไม่เปลี่ยน" แม้หน้าอื่นจะมี motion ชัดเจนแล้วก็ตาม
+  - **ทางเลือก A (ปลอดภัยด้าน performance, ตรงตาม AC ขั้นต่ำ)**: ไม่เพิ่ม entrance animation ให้ 76 tiles เลยตามที่ระบุในหัวข้อ 2.4 — ใช้ motion อื่นที่มีอยู่แล้วทดแทนความรู้สึก "หน้าแรกก็เปลี่ยนไปด้วย" เช่น header/legend ด้านบน Home (ไม่ใช่ tile grid) fade-in ครั้งเดียวตอนเปิดแอป (~200ms) ซึ่งมี element จำนวนน้อยจึงไม่เสี่ยง performance
+  - **ทางเลือก B (motion ครอบคลุมกว่า แต่มี performance risk)**: เพิ่ม entrance animation ให้ tile เป็น "กลุ่ม" แทนที่จะเป็น per-tile stagger เต็มรูปแบบ เช่น fade ทั้ง grid เข้าพร้อมกันเป็นก้อนเดียว (opacity 0→1, 200ms, ไม่มี stagger ต่อ tile) เพื่อให้เห็น motion แต่ยังไม่ต้อง animate transform ของ tile แต่ละอันแยกกัน (ความเสี่ยง performance ต่ำกว่า staggered เพราะเป็น single opacity animation ของ container เดียว ไม่ใช่ 76 animated value พร้อมกัน) — แต่ยังต้องให้ programmer ทดสอบบนอุปกรณ์จริงก่อนว่าราบรื่นจริงเพราะ `ProvinceTile3D`/`Map3D` มี native rendering cost ของตัวเองอยู่แล้วนอกเหนือจาก animation layer
+  - ให้ orchestrator ส่งประเด็นนี้ให้ PM ตัดสินใจว่าจะทำ A (ตาม literal scope ของ AC) หรือ B (ขยาย scope เล็กน้อยเพื่อแก้ปัญหาความรู้สึก "หน้าแรกเหมือนเดิม" ที่ผู้ใช้บ่นโดยตรง) ก่อนที่ programmer จะเริ่ม T120
+
+- **ประเด็น**: การเพิ่ม `variant="emphasized"` เป็น prop ใหม่ของ `PressableScale` เป็นการตัดสินใจเชิง implementation (ไม่ใช่แค่ design spec) — ทีม UIUX เสนอแนวทางนี้เพราะรักษา backward compatibility ได้ง่ายที่สุด (caller เดิมไม่ต้องแก้ถ้าไม่ระบุ prop) แต่ถ้าโปรแกรมเมอร์เห็นวิธีอื่นที่คุ้มค่ากว่า (เช่นแยก component ใหม่ `PressableScaleEmphasized`) ให้ทีม Programmer ตัดสินใจรายละเอียด implementation เองได้ ตราบใดที่ตัวเลข scale/shadow ตามหัวข้อ 3.1 ยังคงถูกต้องตรงตาม spec
+
+---
+
+# ส่วนเพิ่มเติม: Color Palette & Layout Redesign (รอบ 15)
+
+## T124: ตัวเลือกทิศทาง Color Palette ใหม่ทั้งระบบ (Decision Gate)
+
+หมายเหตุ: ทุกตัวเลือกคง semantic เดิม (เขียว=unlocked, เทา=locked, เหลือง/ทอง=warning/Province Master, แดง=danger) ตามสมมติฐานใน requirements.md — ต่างกันแค่ว่า "เขียว" ยังเป็น brand accent หลักด้วยหรือถูกแยกบทบาทออกจากกัน คู่สีข้อความ/ปุ่มสำคัญผ่านเกณฑ์ WCAG AA (≥4.5:1) โดยประมาณจากคู่สีเข้ม/อ่อนตัดกันชัดเจนที่เลือกไว้ — **ต้องยืนยันตัวเลขจริงด้วยเครื่องมือคำนวณ contrast อีกครั้งระหว่าง T126** ตาม AC ของ US-35
+
+### ตัวเลือก A: "Deep Jade" — evolve จากเขียวเดิม (#1D9E75/#0F6E56)
+**Mood**: เขียวมรกตแบบอัญมณี (jewel-tone) เข้มและอิ่มตัวขึ้นกว่าเขียวมิ้นต์แบนเดิม พื้นหลังเปลี่ยนจากขาวล้วนเป็นขาวอมมินท์อ่อนๆ ให้การ์ด/เงาดูมีมิติขึ้นโดยไม่ทิ้งอัตลักษณ์เขียวที่ผู้ใช้คุ้นเคย — ความเสี่ยงต่ำที่สุด เพราะยังอยู่ตระกูลสีเดิม
+
+| token | เดิม | ใหม่ |
+|---|---|---|
+| unlockedTop / accent | #1D9E75 | #15A87A |
+| unlockedSide / accentDark | #0F6E56 | #0B5C46 |
+| lockedTop | #D9D9D9 | #CBD3CF (เทาอมเขียวอุ่นขึ้น) |
+| lockedTopLoading | #E8E8E8 | #E3E8E5 |
+| background | #FFFFFF | #F6F9F7 |
+| textPrimary | #1A1A1A | #122019 |
+| textSecondary | #6B6B6B | #5B6B63 |
+| trackBg | #E5E5E5 | #DCE4E0 |
+| gold | #E5B93C | #D8A93B (โทน old-gold หรูขึ้น) |
+| danger/amber/amberBg | เดิม | คงเดิม (ผ่าน AA อยู่แล้ว) |
+
+**ภาพหน้า Home ที่เปลี่ยนไป**: แผนที่ 3 มิติดูเหมือนเกาะลอยบนพื้นขาวอมมินท์นุ่มตากว่าขาวจ้าเดิม บล็อกจังหวัดที่ปลดล็อกเป็นเขียวมรกตสดเข้มแบบอัญมณีแทนเขียวมิ้นต์แบน แถบ progress/legend ดูกลมกลืนเป็นตระกูลเดียวกันทั้งหน้าแต่ "เข้มขึ้น หรูขึ้น" ชัดเจนเมื่อเทียบข้าง
+
+### ตัวเลือก B: "Twilight Lagoon" — เปลี่ยนทิศทางใหม่ (โทนเย็นทีล/คราม)
+**Mood**: แยกบทบาท "สี unlocked" ออกจาก "สี brand accent" เป็นครั้งแรก — ปัจจุบัน `accent` กับ `unlockedTop` เป็น hex เดียวกันเป๊ะ (#1D9E75) ทำให้เขียวต้องแบกทั้งความหมาย "ปุ่ม/ลิงก์ทั่วไป" และ "ปลดล็อกแล้ว" พร้อมกัน ตัวเลือกนี้ให้เขียวทำหน้าที่ unlocked อย่างเดียว (ชัดเจนขึ้น ไม่ปนกับปุ่มทั่วไป) ส่วน brand accent/ปุ่ม CTA/แถบค้นหา focus เปลี่ยนเป็นทีล-คราม ให้ความรู้สึกทันสมัย/travel-app ระดับพรีเมียมแบบใหม่
+
+| token | ใหม่ |
+|---|---|
+| accent (CTA/ลิงก์/focus) | #0E7C86 |
+| accentDark | #0A5860 |
+| unlockedTop (คงเป็นเขียว ทำหน้าที่ unlocked อย่างเดียว) | #1FAE72 |
+| unlockedSide | #0E7A52 |
+| lockedTop | #D7DEE4 |
+| lockedTopLoading | #E9EDF1 |
+| background | #F5F8FA |
+| textPrimary | #101826 |
+| textSecondary | #5B6B7A |
+| trackBg | #DEE6EA |
+| gold | #D6A94A |
+| (เสนอ token ใหม่) heroCanvasBg | #0F2233 (พื้นหลังเข้มเฉพาะการ์ด Map3D เท่านั้น ดูหัวข้อ Layout ด้านล่าง) |
+
+**การคงความหมาย unlocked**: เขียว (#1FAE72) ยังใช้เฉพาะกับ unlockedTop/side/legend swatch/checkmark เท่านั้น ไม่ปนกับปุ่มทั่วไปอีกต่อไป — ทำให้ "เห็นเขียว = ปลดล็อกแล้ว" ชัดกว่าปัจจุบันด้วยซ้ำ เพราะตอนนี้เขียวไปโผล่ที่ปุ่ม "สถิติ" ทั่วไปด้วย ทำให้ความหมายเจือจาง
+
+**ภาพหน้า Home ที่เปลี่ยนไป**: แถบค้นหา/ลิงก์สถิติ/focus state เปลี่ยนเป็นทีลเข้ม ให้โทนเย็น-หรูแบบรีสอร์ท ส่วนบล็อกจังหวัดปลดล็อกยังเขียวชัดเจนแยกจากกัน ถ้ารวมกับการ์ด `heroCanvasBg` เข้มด้านหลังแผนที่ (ตัวเลือก layout ด้านล่าง) บล็อกเขียวจะเรืองเด่นตัดกับพื้นเข้มแบบจอ dashboard พรีเมียม
+
+### ตัวเลือก C: "Sunset Ember" — โทนใหม่ต่างชัดเจนที่สุด (อุ่น/dark-leaning)
+**Mood**: พื้นหลังโทนถ่านอุ่น (espresso charcoal) + accent ส้มอิฐ (terracotta) ให้ความรู้สึก "premium travel diary ยามเย็น" ต่างจากเดิมชัดเจนที่สุดใน 3 ตัวเลือก แต่มี **ความเสี่ยงสูงสุด**: เป็นทิศทางกึ่ง dark-theme ที่ต้องดูแล contrast ทุกจุดอย่างระมัดระวัง และถ้าทำแค่ Home ก่อน (ตามลำดับเฟสที่วางไว้) หน้าอื่นที่ยังไม่ redesign ใน US-37 จะดู "สว่าง-มืดปนกัน" ชัดกว่าตัวเลือก A/B ระหว่างรอเฟส 2
+
+| token | ใหม่ |
+|---|---|
+| accent | #E8722E |
+| accentDark | #B84F1B |
+| unlockedTop (คงเขียวไว้เพื่อ semantic) | #2FAE7A |
+| unlockedSide | #177A54 |
+| lockedTop | #4A453E |
+| lockedTopLoading | #5C574F |
+| background | #1C1917 |
+| textPrimary | #F5F1EA |
+| textSecondary | #B8AFA3 |
+| trackBg | #332E29 |
+| danger | #E5645F (ปรับให้สว่างขึ้นจากเดิม เพื่อให้อ่านออกบนพื้นเข้ม) |
+| amber / amberBg | #F0A63A / #3A2E1B |
+| gold | #E8C468 |
+
+**ข้อควรระวังเฉพาะตัวเลือกนี้**: (1) ปุ่ม CTA บนพื้น accent (#E8722E) ควรใช้ตัวอักษรสีเข้ม (เช่น textPrimary ของตัวเลือกนี้) แทนสีขาว เพราะส้มเป็นโทนกลาง สีขาวบนพื้นนี้จะไม่ผ่าน 4.5:1 (2) ระบบเงา (`SHADOWS`) ปัจจุบันอิงเงาสีเข้มบนพื้นสว่าง — บนพื้นถ่านเข้มเงาแทบไม่เห็นผล ต้องพิจารณาใช้ขอบเรืองแสง (subtle border/glow) แทนเงาแบบเดิมสำหรับสร้างมิติ
+
+**ภาพหน้า Home ที่เปลี่ยนไป**: ทั้งหน้าเข้มแบบธีมมืด บล็อกจังหวัดปลดล็อกสีเขียวสดตัดกับพื้นถ่านชัดมาก ดาว Province Master สีทองอุ่นเรืองเด่นเป็นพิเศษบนพื้นเข้ม ให้ความรู้สึก "ยกระดับ" แรงที่สุดในสามตัวเลือก แต่ effort/ความเสี่ยงด้าน contrast และความสอดคล้องกับหน้าที่ยังไม่ redesign สูงสุดด้วย
+
+---
+
+## Layout Redesign Spec: HomeScreen (T127–T129)
+
+ใช้ชื่อ token เท่านั้น (`COLORS.xxx`/`SPACING.xxx`/`RADIUS.xxx`/`SHADOWS.xxx`) ใช้ได้กับทุกตัวเลือกสีด้านบนโดยไม่ต้องแก้ spec — **ไม่เปลี่ยน information architecture**: ตำแหน่งปุ่มสถิติ/ตั้งค่า, แถบค้นหา, header progress, แผนที่, legend เรียงลำดับเดิมทุกประการ เปลี่ยนเฉพาะ spacing/elevation/พื้นผิว/สี
+
+### User Flow: US-36 (ไม่เปลี่ยนจากเดิม)
+1. ผู้ใช้เปิดแอป เห็น top bar (ชื่อแอป + ปุ่มสถิติ/ตั้งค่า) → แถบค้นหา → การ์ดความคืบหน้า → (ถ้ายังไม่ปลดล็อกจังหวัดใดเลย) hint banner → การ์ดแผนที่ 3 มิติ 76 จังหวัด → legend
+2. ผู้ใช้แตะจังหวัดบนแผนที่ → ระบบนำทางไป ProvinceDetailScreen (เหมือนเดิมทุกประการ)
+3. ผู้ใช้พิมพ์ค้นหาในแถบค้นหา → เห็น dropdown ผลลัพธ์ (สไตล์เปลี่ยน ฟังก์ชันเดิม) → เลือกแล้วนำทางเหมือนเดิม
+4. ผู้ใช้เห็นความแตกต่างภาพรวมทันทีจาก: จังหวะ spacing ระหว่าง section ที่โปร่งขึ้น, การ์ดแผนที่ที่ดูมีความลึก/ยกตัวขึ้นจากพื้นหลังชัดเจนกว่าเดิม (จุดที่ผู้ใช้บ่นตรงที่สุด)
+
+### Components
+
+#### TopBar (ส่วนหนึ่งของ HomeScreen.tsx)
+- **Purpose**: แสดงชื่อแอป + ทางเข้าสถิติ/ตั้งค่า
+- **การเปลี่ยนแปลง layout**: เพิ่ม padding บนจาก `SPACING.xs` เป็น `SPACING.sm`/`SPACING.md` ให้หายใจมากขึ้นตาม 8pt grid; ปุ่มตั้งค่า (⚙️) ห่อด้วยพื้นผิวกลม (`RADIUS.full`, พื้นหลัง `COLORS.trackBg` หรือ surface tint ของแต่ละตัวเลือก) แทนไอคอนลอยเปล่าๆ ให้อ่านเป็น tap target ชัดเจนขึ้น (แตะยังคง 44×44pt เดิม)
+- **States**: default / pressed (PressableScale scale 0.96 เดิมจาก US-34 — ไม่แตะ) ไม่มี loading/empty/error (เป็น static header)
+- **Content**: ชื่อแอป, ลิงก์ "สถิติ", ปุ่มตั้งค่า — เหมือนเดิมทุกประการ
+
+#### GlobalSearchBar (เฉพาะจุดแสดงผลในหน้า Home)
+- **Purpose**: ค้นหาจังหวัด/แลนด์มาร์กแล้วนำทาง
+- **การเปลี่ยนแปลง layout**: ห่อด้วยการ์ดลอย (`RADIUS.xl`, `SHADOWS.md`) แทนแถบแบนชิดหน้าจอเดิม ให้เป็น bento block ของตัวเอง ระยะขอบ `SPACING.md`
+- **States**: default / focused (border/shadow เข้มขึ้นเล็กน้อยด้วย `SHADOWS.lg`) / loading ผลค้นหา (ใช้ ShimmerBlock เดิม แต่สี shimmer อ้างอิง `COLORS.trackBg`/`lockedTopLoading` ของธีมใหม่ ไม่ใช่เทาลอยตัวเก่า) / empty (ไม่พบผลลัพธ์ — ข้อความ `textSecondary`) / error (เครือข่ายล้มเหลวตอนค้นหา Wikipedia live — ข้อความ `danger`) / success (dropdown ผลลัพธ์)
+- **Micro-interaction**: ไม่เปลี่ยนจาก US-34 (แตะผลลัพธ์ = light haptic เดิม)
+- **หมายเหตุ**: ถ้าเลือกตัวเลือก B/C ที่มี `heroCanvasBg` เข้มด้านหลังแผนที่ ต้อง verify ว่าสี dropdown ยัง contrast พอ เพราะ dropdown แสดงทับ scroll content ซึ่งพื้นหลังหน้าโดยรวมยังสว่างอยู่ (ไม่ใช่พื้นเข้ม) — ไม่กระทบถ้า background หลักยังคงสว่างตามที่ออกแบบ
+
+#### HeaderProgress
+- **Purpose**: แสดง "ปลดล็อกแล้ว X/76 จังหวัด" + progress bar
+- **การเปลี่ยนแปลง layout**: ยกระดับจากการ์ดขาวเรียบเป็น "hero stat bento" — ตัวเลข X/76 ใช้ font ใหญ่ขึ้นเป็นจุดเด่น ส่วนคำอธิบาย "จังหวัด" เป็นบรรทัดรองเล็กกว่า (สร้าง hierarchy ใหม่แทนประโยคบรรทัดเดียวเท่ากันหมด); พื้นหลังการ์ดใช้ surface tint อ่อนๆ ของ accent แทนขาวล้วน; แถบ progress fill ใช้ gradient สองโทน (`accent` → `accentDark`) แทนสีเดียวแบน เพิ่มความสูง track เล็กน้อยให้เข้ากับสัดส่วนใหม่
+- **States**: default / **loading** (คงกลไก ShimmerBlock เดิมทั้งหมดจาก US-34 ไม่แตะ logic แค่ปรับสี skeleton ให้ตรงธีมใหม่) / success (แสดงตัวเลขจริง)
+- **Micro-interaction**: animation fill bar (`withTiming` 300ms) และ fade-in mount 220ms จาก US-34 คงเดิมทุกประการ — ไม่แตะ
+
+#### Map3D + ProvinceTile3D (หัวใจของรอบนี้)
+- **Purpose**: แผนที่ 3 มิติ 76 จังหวัด แสดงสถานะ unlocked/locked/Province Master
+- **การเปลี่ยนแปลง layout (จุดที่ต้อง "รู้สึกว่าเปลี่ยนจริง" ที่สุด)**:
+  - ห่อ `Svg`/`tiltContainer` เดิมด้วยการ์ด "hero canvas" ใหม่: มุมโค้ง `RADIUS.xl`, เงา `SHADOWS.lg`, พื้นหลังเป็น surface โทนต่างจากพื้นหลังหน้า (เสนอ token ใหม่ เช่น `mapCanvasBg`) — ให้ความรู้สึกว่าแผนที่ "ลอยอยู่ในกล่องกระจก/จอแสดงผล" แทนที่จะวางแบนอยู่บนพื้นหลังหน้าตรงๆ เหมือนปัจจุบัน padding รอบ SVG เพิ่มเป็น `SPACING.lg`
+  - เพิ่มเงาวงรีจางๆ ใต้กลุ่ม tile ที่เอียงอยู่ (ambient shadow) เพื่อ "ขาย" ความลึก 3 มิติที่ปัจจุบันดูแบน — เป็นแค่ shape/opacity เพิ่มเติมใน SVG ไม่แตะ geometry ของ tile ใดๆ (สอดคล้องคำตัดสิน PM ข้อ 26)
+  - `topPathProps`/`sidePathProps` ใน ProvinceTile3D: อัปเดตแค่ค่าสี fill จาก `COLORS.unlockedTop`/`unlockedSide`/`lockedTop`/`gold` เป็นชุดใหม่จาก T126 — ไม่แตะ logic การ interpolate/spring ใดๆ; เสนอเพิ่มขอบบนบางๆ โทนอ่อนกว่า unlockedTop (glossy top-edge highlight) เพื่อเสริมความรู้สึก "วัสดุ" ให้บล็อกดูมีมิติ (optional, ไม่บังคับ)
+  - Tooltip (long-press แสดงชื่อจังหวัด) ปัจจุบัน hardcode `rgba(26,26,26,0.88)` — **ต้องย้ายมาอ้างอิง token ใหม่ด้วยใน T128/T131** (ไม่ใช่แค่ tile) มิฉะนั้นจะเป็น hex เดิมหลงเหลือที่ผิด AC ของ US-36 และถ้าเลือกตัวเลือก B/C ที่มี `mapCanvasBg` เข้ม อาจกลืนกับพื้นหลังจนอ่านไม่ออก
+- **States**: default (locked/unlocked/master ตามเดิมทั้งหมด) / loading (shimmer เดิมจาก US-34 คงกลไก) / success (unlock spring), isJustMastered (sparkle sequence) — **ทุก animation/haptic ของ US-34 คงเดิม 100%** เปลี่ยนเฉพาะค่าสีที่ animate ระหว่างไป (`interpolateColor` ยังทำงานเหมือนเดิม แค่ปลายทางสีเปลี่ยน)
+
+#### Legend
+- **Purpose**: อธิบายความหมายสี locked/unlocked/master
+- **การเปลี่ยนแปลง layout**: เปลี่ยนจาก pill ขอบบาง 1px เป็น chip พื้นผิวทึบ + `SHADOWS.sm` บางๆ ให้เข้าชุดกับการ์ด HeaderProgress/Map hero ที่ยกระดับแล้ว แทนที่จะดู "ตกยุค" เมื่อเทียบกับส่วนอื่นที่ปรับแล้ว
+- **States**: static เท่านั้น ไม่มี loading/error (ข้อมูล fix)
+
+#### จังหวะ spacing ระหว่าง section (ภาพรวม HomeScreen.tsx)
+- เปลี่ยนจาก gap แบบผสม (`xs`/`sm` ปนกัน) เป็น `SPACING.lg` สม่ำเสมอระหว่างบล็อกหลักทุกตัว (topBar → search card → header progress card → map hero card → legend) เพื่อให้ scroll แล้วเห็นเป็น section ที่แยกจากกันชัดเจนแบบ bento แทนการเรียงชิดกันเหมือนก่อน — เป็นการเปลี่ยนที่ "เห็นผลทันที" โดยไม่กระทบ IA ใดๆ เลย
+
+### Regression checklist สำหรับ T130 (อ้างอิงจาก spec นี้)
+- จำนวนจังหวัดปลดล็อก/แตะจังหวัด/ผลค้นหา/Province Master ต้องทำงานเหมือนเดิมทุกประการ (ตรวจ prop contract เดิมของ Map3D/ProvinceTile3D ไม่เปลี่ยน)
+- Animation ทุกตัวจาก US-34 (fade-in 220-280ms, spring unlock, sparkle master, shimmer loading) ต้องยัง trigger ด้วย props/logic เดิมทุกประการ — spec นี้แตะเฉพาะ StyleSheet/สี ไม่แตะ `useEffect`/`useSharedValue`/`withSpring` ใดๆ
+
+## Layout Redesign Spec: ProvinceDetailScreen + AddEntryScreen (T132, เฟส 2 US-37)
+
+ทั้งสองหน้ายังไม่เคย redesign อย่างเป็นทางการมาก่อน (ใช้ header/card pattern เดิมตั้งแต่รอบแรกของโปรเจกต์) งานนี้คือ**ยกระดับ spacing/hierarchy + สลับ hex เดิมเป็น token** ไม่ใช่ออกแบบ IA ใหม่ — ไม่เพิ่ม/ลด field, ปุ่ม, หรือ section ใดๆ ที่ไม่เคยมี
+
+### สิ่งที่ต้องแก้ (ใช้ token แทน hex เดิมทั้งหมด — เดิม `'#F0F0F0'`/`'#F2F2F2'`/`'#D9D9D9'`/`'#FFFFFF'` เป็น literal string กระจายอยู่ในทั้งสองไฟล์)
+| จุดเดิม (hardcode) | Token ใหม่ที่ต้องใช้แทน |
+|---|---|
+| `header.borderBottomColor: '#F0F0F0'` | `COLORS.border` |
+| `backButton.backgroundColor: '#F2F2F2'` | `COLORS.trackBg` |
+| `card.backgroundColor` / `textInput` bg ที่เป็น `'#FFFFFF'` | `COLORS.surface` |
+| `textInput`/`dateInput`/`landmarkChip.borderColor: '#D9D9D9'` | `COLORS.border` |
+| `saveButtonText.color` / `addButtonText.color: '#FFFFFF'` | `COLORS.textOnDark` (ความหมายเดิม สีขาวบนพื้นเข้ม/accent เหมือนเดิม แค่ไม่ hardcode) |
+
+### ProvinceDetailScreen — การเปลี่ยนแปลง layout
+- **Header**: คงโครงเดิม (ปุ่มกลับซ้าย/ชื่อจังหวัดกลาง/spacer ขวา) ตามที่ US-37 AC4 ห้ามแตะ IA — เปลี่ยนแค่สี border/พื้นปุ่มตามตารางบน
+- **ระยะห่างระหว่าง section ในสาย scroll** (ProvinceMasterBadge → LandmarkList → ปุ่ม "+เพิ่มบันทึกใหม่" → รายการบันทึก): ปัจจุบันชิดกันมาก (`marginBottom: SPACING.xs` เท่านั้นระหว่างปุ่มกับ list) — เพิ่มเป็น `SPACING.lg` สม่ำเสมอทุกจุดต่อ section ตาม pattern เดียวกับ HomeScreen (T127) ให้ scroll แล้วรู้สึกเป็น block ที่แยกกันชัดเจนแทนการเรียงชิดแบบ list แบนเดิม
+- **`ProvinceMasterBadge`**: ไม่แตะ component ภายใน (ผ่าน redesign มาแล้วรอบก่อน) มีแค่ระยะห่างรอบนอกที่เปลี่ยนตามข้อบน
+- **State อื่น** (loading skeleton, empty state): ใช้ component เดิม (`ShimmerBlock`/`EmptyState`) ไม่เปลี่ยน ไม่มี state ใหม่
+
+### AddEntryScreen — การเปลี่ยนแปลง layout
+- **Header**: เหมือน ProvinceDetailScreen ด้านบน (สี border/ปุ่มเท่านั้น)
+- **การ์ด "ข้อมูลหลัก"/"รายละเอียดเพิ่มเติม"**: นอกจากสลับ `backgroundColor` เป็น `COLORS.surface` แล้ว เพิ่มเส้นขอบบาง `1px COLORS.borderLight` รอบการ์ด (การ์ดเดิมพึ่งเงา `SHADOWS.sm` อย่างเดียวซึ่งบนพื้นหลัง mint อ่อนใหม่ (`COLORS.background` #F6F9F7) ที่ใกล้เคียงสีขาวของการ์ดมาก เงาบางๆ อาจไม่พอให้ขอบเขตการ์ดชัดเจน — ขอบบางช่วยแยกภาพได้แน่นอนกว่าโดยไม่ต้องเพิ่มเงาหนักขึ้น)
+- **Input fields** (`textInput`/`dateInput`): border → `COLORS.border` ตามตาราง, focus state (`textInputFocused`, border `COLORS.accent` + `SHADOWS.sm`) ไม่ต้องแก้ (ใช้ token เดิมอยู่แล้ว ทำงานถูกต้องกับสีใหม่โดยอัตโนมัติ)
+- **`landmarkChip`**: border → `COLORS.border`, selected state (`COLORS.accent` bg) ไม่ต้องแก้เช่นกัน
+- **ปุ่ม CTA "บันทึก"/deleteButton**: คงพฤติกรรม/สีพื้น (`COLORS.accent`/`COLORS.danger`) เดิมทุกประการ ตัวอักษรขาวบนปุ่ม accent เป็น pattern เดียวกับปุ่ม "+เพิ่มบันทึกใหม่" ที่มีอยู่แล้วทั้งแอป (ผ่านการใช้งานจริงมาตั้งแต่รอบแรกโดยไม่เคยถูก QA ตีกลับเรื่อง contrast) — **ไม่ต้อง audit ซ้ำ** เป็นการสลับจาก hardcode `'#FFFFFF'` เป็น `COLORS.textOnDark` (ค่าเท่ากัน) เท่านั้น ไม่ใช่คู่สีใหม่ที่ไม่เคยตรวจ
+
+### Regression checklist สำหรับ T139 (ส่วนของสองหน้านี้)
+- Validation ของฟอร์ม (title/date required, error text แสดง/หายถูกจุด) ต้องทำงานเหมือนเดิม — สเปกนี้ไม่แตะ logic `validate()`/state ใดๆ
+- Nominatim search chip, PhotoPicker, TagSelector, landmark auto-checkin chip ต้องทำงานเหมือนเดิมทุกประการ (ไม่แตะ handler ใดๆ)
+- ปุ่ม "+ เพิ่มบันทึกใหม่" ใน `ProvinceDetailScreen.tsx:89` ต้องยังมี `variant="emphasized"` เดิมจาก US-34 (ไม่ใช่ scope ของ task นี้แต่ต้องไม่ถูกลบโดยไม่ตั้งใจตอนแก้ style)
+
+## ข้อเสนอแนะที่อาจขัดกับ requirement (ให้ PM ตัดสินใจ)
+
+**ประเด็น**: `mapCanvasBg` เข้ม (dark hero canvas) หลังแผนที่ 3 มิติ — ควรใช้พื้นเข้มตัดกันแรงเพื่อ "ขาย" ความรู้สึกเปลี่ยนแปลงชัดที่สุด (ตรงกับที่ผู้ใช้บ่น) หรือใช้พื้น tint อ่อนที่กลืนกับพื้นหลังหน้ามากกว่าเพื่อความสม่ำเสมอกับหน้าที่ยังไม่ redesign ในเฟส 2
+
+- **ทางเลือกA**: `mapCanvasBg` เข้ม (โดดเด่นเฉพาะจุด, effort เพิ่มเรื่อง contrast ของ tooltip/ข้อความ, อาจดูเป็น "เกาะแยก" จากหน้าอื่นที่ยังสว่างในช่วงเฟส 1→2)
+- **ทางเลือก B**: `mapCanvasBg` เป็น tint อ่อนของพื้นหลังหลัก (ปลอดภัยกว่า, สม่ำเสมอกับทั้งแอประหว่างรอเฟส 2, แต่ผลกระทบด้าน "รู้สึกเปลี่ยนจริง" อาจน้อยกว่าทางเลือก A)
+- ข้อเสนอ: ทางเลือกนี้ผูกกับตัวเลือกสี — ถ้าเลือกโทน A ("Deep Jade") แนะนำทางเลือก B (tint อ่อน) เพราะพื้นเข้มจะขัดกับโทนอ่อนทั้งระบบ; ถ้าเลือกโทน B/C แนะนำทางเลือก A (เข้ม) เพราะเข้ากับทิศทางที่ตั้งใจต่างจากเดิมชัดเจนอยู่แล้ว — แต่สุดท้ายให้ PM/ผู้ใช้ยืนยันพร้อมกับ T125

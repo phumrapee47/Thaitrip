@@ -25,10 +25,16 @@ function search(text: string) {
 }
 
 describe('GlobalSearchBar dropdown — province match (US-24 AC1/AC2/AC3/AC5)', () => {
+  // US-24 AC5 (revised by US-26): province/local-dataset matches must still
+  // appear instantly with zero network access — the debounced nationwide
+  // Wikipedia search (US-26) only fires ~450ms later. Fake timers keep that
+  // debounce from ever firing in this test, so the instant path staying
+  // fetch-free is verified deterministically rather than by lucky timing.
   it('shows a real-time dropdown for both Thai and English province name queries, with the 📍 icon, entirely offline', async () => {
+    jest.useFakeTimers();
     const originalFetch = global.fetch;
     global.fetch = jest.fn(() => {
-      throw new Error('GlobalSearchBar must not call fetch — it is local-dataset-only (US-24 AC5)');
+      throw new Error('the instant local-dataset match must not call fetch (US-24 AC5)');
     }) as any;
 
     try {
@@ -46,10 +52,13 @@ describe('GlobalSearchBar dropdown — province match (US-24 AC1/AC2/AC3/AC5)', 
       search('phuket');
       await waitFor(() => expect(screen.getByText('ภูเก็ต')).toBeTruthy());
 
-      // AC5: never touched the network.
+      // AC5: the instant local match itself never touched the network
+      // (the debounce timer that would trigger US-26's online search is
+      // deliberately never advanced in this test).
       expect(global.fetch).not.toHaveBeenCalled();
     } finally {
       global.fetch = originalFetch;
+      jest.useRealTimers();
     }
   });
 });

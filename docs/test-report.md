@@ -601,3 +601,342 @@ npx jest   (รันซ้ำ 3 รอบเพื่อตรวจ flakiness)
 
 ### ข้อกังวลเล็กน้อย (ไม่ fail AC ใด, เพื่อบันทึกไว้)
 - `emailLinkIntegrity.test.tsx` มี timing flake เวลารันรวมกับ suite อื่น (ไม่เกี่ยวกับ US-25) — ควรพิจารณาแก้ที่ต้นเหตุ (เช่น `waitFor` timeout เดิม/`act` wrapping) ในรอบทำความสะอาด test suite ถัดไป เพื่อไม่ให้เกิดความสับสนว่า regression จริงหรือ flake
+
+---
+
+## รอบ 7: Bug Fix — Search Result Tap ค้าง + หน้าจังหวัด Scroll ไม่ได้ (รอบ 14 ใน dev-notes.md, ตรวจสอบอิสระโดย Tester)
+
+**ขอบเขต:** ตรวจสอบว่า 2 บั๊กที่ programmer แก้ (นอก pipeline BA/PM/UIUX เพราะเป็นบั๊กเล็ก) แก้ได้จริงตามที่อ้าง — (1) `src/screens/HomeScreen.tsx` เพิ่ม `keyboardShouldPersistTaps="handled"` ให้ ScrollView หลัก แก้ปัญหาแตะผลลัพธ์ค้นหาแล้ว "ค้าง" ตอน TextInput ยัง focus อยู่ (2) `src/screens/ProvinceDetailScreen.tsx` ห่อ body ด้วย `<ScrollView keyboardShouldPersistTaps="handled">` และแปลง FlatList ของ entries เป็น `.map()` แก้ปัญหาหน้าจังหวัดเลื่อนไม่ได้ — เขียน integration test ใหม่ 7 ไฟล์ (`src/__tests__/qa-round5/`) แทนการเชื่อ unit test เดิมของ programmer (ที่ใช้ `fireEvent.press` ตรงๆ ซึ่งข้าม native gesture arbitration — ไม่มีทางจับบั๊ก class นี้ได้ตามที่ dev-notes.md ยอมรับเองแล้ว)
+
+### ผลรัน Test
+- `npx jest src/__tests__/qa-round5` → **PASS 7/7 suites, 7/7 tests**
+- `npx jest` (เต็มชุด รวม unit + integration/e2e เดิมทั้งหมด) → **PASS 57/57 suites, 276/277 tests, skip 1** (skip เดิมที่มีเอกสารอธิบายแล้ว — T30, ต้องใช้อุปกรณ์จริง ไม่เกี่ยวกับรอบนี้) — **ไม่มี regression จากการแก้ 2 บั๊กนี้**
+- `npx tsc --noEmit` → ผ่าน (0 errors)
+
+### ข้อจำกัดของเครื่องมือที่ต้องระบุตรงๆ ก่อนอ่านผล (สำคัญ)
+React Native Testing Library (`react-test-renderer` ข้างใต้) **ไม่มีการจำลอง native touch-responder arbitration** ระหว่าง ScrollView ที่ซ้อนกัน — นี่คือสาเหตุที่ unit test เดิมของ programmer (`fireEvent.press` เรียก `onPress` ตรงๆ) ผ่านอยู่แล้วทั้งที่มีบั๊กจริง (ยืนยันตรงกับที่ dev-notes.md บรรทัด 560 อธิบายไว้เอง) ไม่มีทางทำให้ `fireEvent` จำลอง "ScrollView ชั้นนอกดักการแตะครั้งแรกไปเพื่อ dismiss keyboard ก่อน" ได้ในเครื่องมือนี้ ดังนั้น test ใหม่ที่เขียนในรอบนี้พิสูจน์การแก้ 2 ทาง:
+1. **Structural regression guard** — เดินสำรวจ render tree จริง (`toJSON()`) แล้วยืนยันว่า **ทุก ScrollView** ที่อาจอยู่ระหว่าง TextInput ที่ focus กับผลลัพธ์ที่กดได้ ต้องมี prop `keyboardShouldPersistTaps="handled"` จริง (ไม่ใช่แค่เชื่อโค้ดที่เห็น) — ถ้ามีใครลบ prop นี้ออกในอนาคต test นี้จะ fail ทันที ต่างจาก suite เดิมที่ไม่มีทาง fail เลยแม้ลบ prop ทิ้ง
+2. **Behavioral, focus-kept-throughout** — จำลอง sequence ตรงกับที่ผู้ใช้รายงานจริง: focus → พิมพ์ → **ไม่ blur** → กดผลลัพธ์ทันที (ต่างจาก test เดิมที่ก็ไม่ blur เหมือนกันแต่ไม่มี structural guard คู่กัน)
+
+**การยืนยันแบบสมบูรณ์ว่า "แตะแล้วไม่ค้างจริง" ต้องทดสอบบนอุปกรณ์/emulator จริงเท่านั้น** — ยังไม่มีให้ทดสอบในสภาพแวดล้อมนี้ (ข้อจำกัดเดียวกับ T30 ที่ dev-notes.md บันทึกไว้ตลอดมา) จึงถือเป็น **coverage gap ที่เหลืออยู่จริง ไม่ใช่ PASS แบบสมบูรณ์ 100%**
+
+### บั๊ก 1: Search result tap ค้าง (HomeScreen)
+- [x] **โครงสร้าง:** ทุก ScrollView ในหน้า Home (ScrollView หลักที่ห่อ GlobalSearchBar + ScrollView ของ dropdown ผลลัพธ์) มี `keyboardShouldPersistTaps="handled"` จริงตาม root cause ที่ระบุ — **PASS** (`src/__tests__/qa-round5/homeScreenScrollViewGuard.test.tsx` — เดิน `toJSON()` ยืนยัน `RCTScrollView` ทั้ง 2 ตัวที่ mount พร้อมกันตอน dropdown เปิดอยู่)
+- [x] **พฤติกรรม:** แตะผลลัพธ์ landmark ("หาดป่าตอง") ระหว่าง TextInput ยัง focus อยู่ (ไม่ blur ก่อน) → นำทางไปหน้าจังหวัดภูเก็ตถูกต้อง — **PASS** (`homeScreenSearchTapLandmarkFocused.test.tsx`)
+- [x] **พฤติกรรม:** แตะผลลัพธ์จังหวัด ("เชียงใหม่") ระหว่างยัง focus อยู่ → นำทางถูกต้องเช่นกัน (ไม่ใช่แค่ landmark ที่ทำงาน) — **PASS** (`homeScreenSearchTapProvinceFocused.test.tsx`)
+- [ ] **การยืนยันบนอุปกรณ์จริงว่า native gesture arbitration ไม่ swallow tap อีกต่อไป** — **ไม่ได้ตรวจ** (ข้อจำกัดเครื่องมือ ดูหัวข้อด้านบน)
+
+### บั๊ก 2: หน้าจังหวัด scroll ไม่ได้ (ProvinceDetailScreen)
+- [x] body ของหน้าถูกห่อด้วย ScrollView จริง (`keyboardShouldPersistTaps="handled"`) ไม่ใช่ View ธรรมดา แม้เนื้อหายาวเกิน viewport (ทดสอบด้วย 30 entries) — **PASS** (`provinceDetailScrollContainer.test.tsx`)
+- [x] entries ทั้งหมด render ผ่าน `.map()` ตรงๆ ไม่มี FlatList/VirtualizedList หลงเหลืออยู่ใน tree เลย (ทั้ง 30 รายการ render พร้อมกันจริง ไม่ถูก windowing) และไม่มี console.error "VirtualizedLists should never be nested inside plain ScrollViews" — **PASS** (`provinceDetailScrollContainer.test.tsx`)
+- [x] body ScrollView รับ scroll event จริง (`fireEvent.scroll` ด้วย `contentOffset.y=1200`) โดยไม่ throw — ยืนยันว่าเป็น container ที่ใช้งานได้จริง ไม่ใช่แค่ tag เฉยๆ — **PASS** (`provinceDetailScrollEvent.test.tsx`)
+- [x] การ์ด Landmark ยังกดได้ปกติระหว่าง in-province search TextInput ยัง focus อยู่ (บั๊ก class เดียวกับบั๊ก 1 แต่เกิดได้บนหน้านี้ก่อนแก้เช่นกัน เพราะทั้งหน้าไม่มี scroll container ที่ปลอดภัยเลย) — ยืนยันด้วย progress indicator เปลี่ยนจาก "เช็คอินแล้ว 0/5 แห่ง" เป็น "1/5" จริงหลังกด — **PASS** (`provinceDetailSearchTapFocused.test.tsx`)
+- [x] จังหวัดที่ไม่มี entry และไม่มี landmark เลย (empty state ทั้งสองส่วน) ยัง render ได้ปกติภายใน ScrollView ใหม่ ไม่ crash — **PASS** (`provinceDetailEmptyState.test.tsx`, ใช้ `chaiyaphum` ที่ dev-notes.md ยืนยันแล้วว่า Overpass คืน 0 landmark จริง)
+- [ ] **การยืนยันบนอุปกรณ์จริงว่าลากนิ้ว/สวมนิ้ว (pan gesture) เลื่อนดูเนื้อหาได้จริงบนจอ** — **ไม่ได้ตรวจ** (jest test-renderer ไม่มี layout/viewport จริงให้วัด overflow หรือ pan gesture จริง — ข้อจำกัดเดียวกับ T30)
+
+### สรุปรอบนี้
+ทั้ง 2 บั๊กที่ programmer แก้ **ตรงกับ root cause ที่วิเคราะห์ไว้จริง** ตรวจสอบทั้งระดับโครงสร้าง (prop ที่ถูกต้องตามการวิเคราะห์) และระดับพฤติกรรม (sequence จริงที่ผู้ใช้รายงาน) — ไม่พบ regression ใดๆ ต่อ suite เดิม (57/57 suites, 276/277 tests, skip 1 เดิม) ไม่มีบั๊ก severity สูง แต่มี **coverage gap ที่ยอมรับได้ (ไม่ใช่บั๊ก)**: การยืนยันแบบ 100% ว่า native touch arbitration ไม่ swallow tap อีกต่อไป และการลากนิ้ว scroll ได้จริงบนจอ ยังต้องรอทดสอบบนอุปกรณ์/emulator จริงซึ่งไม่มีในสภาพแวดล้อมนี้ (เชื่อมโยงกับข้อจำกัดเดียวกับ T30 ที่บันทึกไว้ตั้งแต่รอบแรก)
+
+
+---
+
+## รอบ 8: Bottom Tab Navigation & ข่าวท่องเที่ยว RSS (US-28 – US-32, ตรวจสอบอิสระโดย Tester)
+
+**ขอบเขต:** ตรวจสอบอิสระว่าฟีเจอร์ Bottom Tab Navigation + หน้าข่าว RSS ที่ programmer implement ตรงตาม AC ของ US-28 ถึง US-32 จริงหรือไม่ โดยเขียน integration/e2e test ชุดใหม่ 3 ไฟล์ (`src/__tests__/qa-round8/`) แยกจาก unit/integration test เดิมของ programmer (`src/services/newsService.test.ts`, `src/services/newsRssParser.test.ts`, `src/__tests__/integration/appNavigatorBottomTabs.test.tsx`, `src/__tests__/integration/newsScreen.test.tsx`) — ไม่แก้ไข/ลบ test เดิมของ programmer เลย จุดเน้นที่ต่างจาก test เดิม:
+1. `appNavigatorRegressionDeep.test.tsx` — เดินสายเต็ม Home → ProvinceDetail → **AddEntry** (ลึก 2 ชั้นใน Map stack ไม่ใช่แค่ ProvinceDetail ที่ programmer ทดสอบไว้แล้ว) ผ่าน `AppNavigator` จริง แล้วสลับแท็บไปข่าวและกลับมา ยืนยันว่า state ของ AddEntry ไม่หาย + ทดสอบอิสระกรณี cross-tab deep-link ที่ programmer flag ไว้เอง (StatsScreen กดปุ่ม "ไปที่แผนที่" จากแท็บข่าว)
+2. `newsScreenRealServiceIntegration.test.tsx` — Render `NewsScreen` โดย **ไม่ mock `newsService`** (mock เฉพาะ `global.fetch` + ใช้ AsyncStorage mock จริงของ jest.setup.js) เพื่อให้ chain fetch → parse XML จริง → dedupe/sort จริง → cache จริง → render ทำงานครบวงจรจริง (ต่างจาก test เดิมของ programmer ที่ mock `newsService` ทั้งโมดูล ซึ่งพิสูจน์ได้แค่ว่า `NewsScreen` เรียก service ถูก ไม่ได้พิสูจน์ว่า service+parser+cache ทำงานร่วมกันถูกจริง)
+3. `newsToastDuration.test.tsx` — ยืนยันด้วย fake timers ว่า toast แสดงจริง ~4000ms ตามคำตัดสิน PM ข้อ 23 (test เดิมของ programmer เช็คแค่ข้อความ toast ขึ้น ไม่เคยเช็ค duration จริง)
+
+### ผลรัน Test
+- `npx jest src/__tests__/qa-round8` → **PASS 3/3 suites, 11/11 tests**
+- `npx jest` (เต็มชุด รวม unit + integration/e2e เดิมทั้งหมด + ของใหม่รอบนี้) → **PASS 64/64 suites, 330/331 tests, skip 1** (skip เดิมที่มีเอกสารอธิบายแล้ว — T30, ต้องใช้อุปกรณ์จริง ไม่เกี่ยวกับรอบนี้) — **ไม่มี regression**
+- `npx tsc --noEmit` → ผ่าน (0 errors) — ตรงกับที่ programmer รายงาน
+
+### US-28: Bottom Tab Navigation
+- [x] AC1 (2 แท็บเสมอ "แผนที่"/"ข่าว" พร้อมไอคอน+label ไทย) — **PASS** (ยืนยันซ้ำผ่าน `appNavigatorBottomTabs.test.tsx` เดิมของ programmer, ไม่พบปัญหาเพิ่มเติม)
+- [x] AC2 (แท็บแผนที่ = HomeScreen เดิมครบ, ไม่ regression ต่อ US-1/2/3/14/24/26) — **PASS** ยืนยันด้วย regression suite เต็ม 64/64 suites รวม `homeScreen.test.tsx`, `globalSearchBar*.test.tsx` ทั้งหมด, `map3d.test.tsx` ผ่านหมด
+- [x] AC3 (แท็บข่าว = NewsScreen เป็นหน้าเริ่มต้น) — **PASS**
+- [x] AC4 (ปุ่ม Stats/Settings push เข้า stack ของแท็บปัจจุบัน ไม่ใช่แท็บที่ 3) — **PASS** ยืนยันซ้ำจากทั้ง 2 แท็บ
+- [x] AC5 (ProvinceDetail/AddEntry push ใน Map stack ตามเดิม + state ไม่หายเมื่อสลับแท็บ) — **PASS** — ทดสอบเพิ่มเติมให้ลึกกว่าที่ programmer ทำ: พิสูจน์ว่า **AddEntry** (ไม่ใช่แค่ ProvinceDetail) ก็รอด survive การสลับแท็บเช่นกัน (`appNavigatorRegressionDeep.test.tsx` เทสแรก)
+- [x] AC6 (route dev-only `Map2DValidation` ยังเข้าถึงได้) — **PASS** (ยืนยันซ้ำจาก test เดิมของ programmer)
+
+### US-29: ดูรายการข่าวจาก RSS feed จริง
+- [x] AC1 (ดึง RSS จริง, parse, เรียงตาม pubDate ล่าสุด→เก่าสุด) — **PASS** ยืนยันด้วย pipeline จริง (`fetchAndProcessNews` ไม่ mock) ผ่าน XML ที่มี CDATA/HTML entity/media:content/รายการซ้ำ/ไม่มี pubDate ปนกัน แล้วเช็ค `news-list` FlatList `data` order ตรงตามที่คาด
+- [x] AC2 (รูป/placeholder, title, summary ตัด HTML, วันที่อ่านง่าย) — **PASS** ยืนยันด้วย pipeline จริง summary ที่ได้ decode entity (`&amp;` → `&`) และตัด tag ออกหมดจริง ไม่ใช่แค่ mock summary ที่ programmer ป้อนเข้ามาตรงๆ
+- [x] AC3 (pull-to-refresh บังคับดึงใหม่ไม่ต้องรอ cache) — **PASS** ยืนยันด้วย service จริง (`global.fetch` ถูกเรียกจริงตอนลาก refresh แม้ cache ยังไม่หมดอายุ)
+- [x] AC4 (loading state ชัดเจนตอนดึงครั้งแรกที่ยังไม่มี cache) — **PASS** (ยืนยันจาก test เดิมของ programmer ที่ควบคุม timing ได้ตรงกว่า — ดูหมายเหตุในไฟล์ของเรา)
+- [x] AC5 (ทดสอบได้จริงด้วย mocked RSS XML string inject เข้า parser) — **PASS** ยืนยันซ้ำอิสระ ทั้งจากไฟล์ unit เดิมของ programmer (`newsRssParser.test.ts`) และจาก integration จริงในรอบนี้ที่ inject XML ผ่าน `global.fetch` แทน
+
+### US-30: Caching และ Offline-Friendly
+- [x] AC1 (persist ลง AsyncStorage พร้อม timestamp) — **PASS** ยืนยันด้วย AsyncStorage mock จริง (ไม่ mock `newsService`)
+- [x] AC2 (offline/ดึงล้มเหลว → แสดง cache เดิมพร้อม indicator) — **PASS** สำหรับกรณี "cache หมดอายุ + fetch สดล้มเหลว" ยืนยันด้วย pipeline จริง (`newsScreenRealServiceIntegration.test.tsx`)
+  - **แต่พบส่วนที่ไม่ตรงกับ design-spec** — ดู "บั๊กที่พบ" ด้านล่าง (ข้อ 1)
+- [x] AC3 (cache ว่างเปล่าจริง + ไม่มีเน็ต → error state ไม่ raw error/ค้าง) — **PASS** ยืนยันด้วย fetch จริง reject HTTP 503, ไม่มี cache เลย → error state + กด "ลองอีกครั้ง" กู้คืนสำเร็จ
+- [x] AC4 (มีเน็ตกลับมา หลัง TTL หมด → fetch พื้นหลังไม่บล็อกของเดิม) — **PASS** ยืนยันด้วย service จริง: cache เดิมโชว์ก่อนเสมอ ไม่รอ fetch เสร็จก่อนค่อยแสดงอะไรเลย
+
+### US-31: In-App Browser
+- [x] AC1 (แตะข่าว → `openBrowserAsync` ไป link ต้นทาง) — **PASS** (ยืนยันซ้ำจาก test เดิมของ programmer ไม่พบปัญหาเพิ่มเติม)
+- [ ] AC2 (ปิด browser แล้ว scroll/state เดิมไม่หาย) — **ไม่มี automated test ยืนยันได้ตรงๆ** — เห็นด้วยกับที่ programmer flag ไว้ (T108): RNTL/react-test-renderer จำลอง native modal overlay ของ `expo-web-browser` ไม่ได้ ไม่มีทางสั่ง "เปิดแล้วปิด" จริงในเครื่องมือนี้เพื่อวัด scroll offset ที่เหลืออยู่ เป็น **coverage gap ที่ยอมรับได้** (ต้อง manual QA บนอุปกรณ์จริงเท่านั้น) — Tester เห็นพ้องกับมุมมองของ programmer ในประเด็นนี้ ไม่มีมุมมองต่าง แต่เสริมข้อสังเกต: จาก source code (`NewsScreen.tsx`) ยืนยันได้แน่นอนอย่างน้อยว่า **ไม่มี logic ใดที่ unmount/reset `<FlatList>` หรือ state ของ `items`/scroll เมื่อ `handleOpenNews` ทำงาน** (ไม่มีการ setState ใดๆ ที่กระทบ list ในเส้นทางนั้นเลยนอกจาก toast) จึงมีความเชื่อมั่นสูงทาง static analysis ว่าไม่น่าพัง แต่ยังไม่ใช่การยืนยันเชิงพฤติกรรมจริง
+- [x] AC3 (link ว่าง/parse ผิด → ไม่ crash, แจ้งข้อความ) — **PASS** ยืนยันซ้ำ + เพิ่มการยืนยัน duration ของ toast ที่ใช้แจ้ง (~4000ms ตรงตามคำตัดสิน PM ข้อ 23 เป๊ะ ผ่าน fake timers ไม่ใช่แค่เชื่อว่า prop ถูกส่ง)
+- [x] AC4 (ไม่มีเน็ตตอนกด → แจ้งข้อความ ไม่เปิด browser ค้าง) — **PASS** ยืนยันซ้ำเช่นกัน
+
+### US-32: Edge Case ของข้อมูลข่าว
+- [x] AC1 (feed ว่างเปล่าจริง → empty state แยกจาก error state) — **PASS** ยืนยันด้วย pipeline จริง (XML ที่ parse สำเร็จแต่ไม่มี `<item>` เลย)
+- [x] AC2 (ไม่มีรูป → placeholder ไม่ใช่ broken image) — **PASS** ยืนยันด้วย pipeline จริง มี 2 รายการไม่มีรูปในชุดทดสอบ ต่างก็ได้ placeholder ถูกต้อง
+- [x] AC3 (link/title ซ้ำ → dedupe เก็บรายการแรก) — **PASS** ยืนยันด้วย pipeline จริง (ไม่ใช่แค่ unit test ของ `processNewsItems` เดิม) — ข่าวซ้ำ link ไม่ขึ้นซ้ำใน UI จริง
+- [x] AC4 (fetch ล้มเหลวจริง + ไม่มี cache → error state พร้อมปุ่มลองใหม่ในหน้าเดิม) — **PASS** ยืนยันด้วย pipeline จริง + กดปุ่มจริงแล้วกู้คืนสำเร็จ
+- [x] AC5 (ไม่มี pubDate ที่ parse ได้ → อยู่ท้ายสุด ไม่ทำให้ทั้ง list พัง) — **PASS** ยืนยันด้วย pipeline จริง ลำดับ FlatList data ตรงตามที่คาด (มี pubDate มาก่อน, ไม่มี pubDate ไปท้ายสุด)
+
+### บั๊กที่พบ (ใหม่ในรอบนี้ — ไม่เคยถูก flag มาก่อน)
+
+**บั๊ก 1 (Severity: Medium — ไม่ crash, ไม่ทำให้ AC ข้อไหนพังแบบสมบูรณ์ แต่ขัดกับ design-spec ตรงๆ และกระทบผู้ใช้ทุกครั้งที่เปิดแอปซ้ำ):** Cache Indicator ("🕐 กำลังแสดงข่าวจากแคช • อัปเดตล่าสุด...") **แสดงผิดเงื่อนไข** — โผล่ทุกครั้งที่เปิดแท็บข่าวใหม่ (cold reopen) ตราบใดที่มี cache เดิมอยู่ **แม้ cache นั้นจะยังไม่หมดอายุ (อยู่ใน TTL 45 นาที) และไม่มีการพยายาม fetch สดเลยด้วยซ้ำ** ไม่ใช่แค่กรณี "fetch สดล้มเหลว/ไม่มีเน็ตขณะนี้" ตามที่ `docs/design-spec.md` ระบุไว้ตรงๆ (บรรทัด 559: "ถ้าตอนนี้ไม่มีเน็ต/ดึงล้มเหลว แต่มี cache เดิม → เห็นรายการจาก cache พร้อม Cache Indicator"; บรรทัด 599: "ถ้าเป็นข้อมูล cache ที่ fetch สดล้มเหลว/ไม่มีเน็ตขณะนี้ → แสดง Cache Indicator")
+  - **สาเหตุ (อ่านโค้ดยืนยันแล้ว):** `src/screens/NewsScreen.tsx` บรรทัด ~93-105 — ทันทีที่อ่าน cache สำเร็จ (`readNewsCache()`) จะ `setIsShowingCache(true)` เสมอไม่ว่า cache จะ stale หรือไม่ (`isCacheStale` เอาไว้ตัดสินแค่ว่าจะยิง `loadLive()` เบื้องหลังหรือไม่) และ flag นี้จะไม่ถูกเซ็ตกลับเป็น `false` เลยจนกว่า `loadLive()` จะสำเร็จจริง (ซึ่งจะไม่ถูกเรียกเลยถ้า cache ยังไม่หมดอายุ ตาม `shouldFetch` logic) ผลคือ: ผู้ใช้เปิดแอปซ้ำภายใน 45 นาที (สถานการณ์ปกติที่พบบ่อยที่สุด) จะเห็น label "กำลังแสดงข่าวจากแคช" ตลอด ทั้งที่ไม่มีอะไรผิดพลาดและข้อมูลยังสดอยู่จริง อาจทำให้ผู้ใช้เข้าใจผิดว่าเน็ตมีปัญหาหรือข้อมูลเก่า
+  - **Repro steps (ยืนยันด้วย test อัตโนมัติแล้ว, ดู `newsScreenRealServiceIntegration.test.tsx` เทส `[POTENTIAL AC GAP]...`):** 1) เขียน cache ผ่าน `writeNewsCache(items)` (fetchedAt = ตอนนี้) 2) mock `global.fetch` ไว้เฉยๆ (ไม่ถูกเรียกเลยเพราะ cache ยังสด) 3) mount `NewsScreen` 4) พบว่า cache indicator ขึ้นแสดงทันที ทั้งที่ `global.fetch` ไม่เคยถูกเรียกเลยสักครั้ง
+  - **สิ่งที่คาดหวังตาม design-spec:** indicator ควรขึ้นเฉพาะกรณี "กำลังแสดงข้อมูล cache เพราะการ fetch สดครั้งล่าสุด (หรือครั้งนี้) ล้มเหลว/ไม่มีเน็ต" เท่านั้น ถ้า cache ยังสดและไม่มีการพยายาม fetch ใหม่เลย ไม่ควรมี indicator ใดๆ (แสดง list เฉยๆ เหมือนข้อมูลปกติ)
+  - **ข้อเสนอแนะ (ไม่ใช่หน้าที่ Tester แก้เอง):** แยก flag "แสดง indicator" ออกจาก flag "ข้อมูลนี้มาจาก cache" — ควรตั้งเป็น `true` เฉพาะตอน `loadLive()` reject จริงเท่านั้น (ไม่ใช่ทุกครั้งที่อ่าน cache สำเร็จตอน mount)
+
+### ประเด็นที่ programmer flag ไว้ 3 ข้อ — มุมมองอิสระของ Tester
+1. **Deep-link ข้ามแท็บ (StatsScreen "ไปที่แผนที่" จากแท็บข่าว navigate('Home') ไม่ได้)** — **เห็นด้วยว่าไม่ crash จริง** (ยืนยันด้วย `appNavigatorRegressionDeep.test.tsx` เทสที่ 2 — กดปุ่มแล้วไม่ throw, แอปไม่ค้าง) และเห็นด้วยว่าไม่มี AC ใดบังคับให้ทำงานข้ามแท็บ จึงไม่ fail AC ใด **แต่มีมุมมองเสริม**: พฤติกรรมจริงคือผู้ใช้ที่เจอ edge case นี้ (เปิดแอปเข้าแท็บข่าวตรงๆ, ไม่มี entry เลย, กด Stats แล้วกด "ไปที่แผนที่") จะ **ค้างอยู่หน้า Stats แบบว่างเปล่าโดยไม่มีปุ่มกลับแผนที่ที่ใช้งานได้เลยในหน้านั้น** (มีแต่ปุ่ม "‹ กลับ" ที่ header ซึ่งพากลับไป News ไม่ใช่แผนที่) เป็น UX dead-end จริงที่ผู้ใช้บางคนอาจเจอ แม้ไม่ใช่บั๊กตาม AC ที่มี — เสนอให้ PM พิจารณาเป็น follow-up item เพื่อความสมบูรณ์ของ UX ไม่ใช่ blocking issue
+2. **T108 scroll/list state คงอยู่หลังปิด in-app browser ไม่มี automated test** — **เห็นด้วยเต็มที่** กับเหตุผลทางเทคนิคที่ programmer ให้ไว้ (RNTL จำลอง native modal ไม่ได้จริง) ตรวจสอบ source code เพิ่มเติมแล้วก็ไม่พบ logic ใดที่จะ reset state ในเส้นทางนั้น (ดู AC2 ด้านบน) แต่ยังคงเป็น **coverage gap ที่ต้อง manual QA บนอุปกรณ์จริง** เท่านั้นถึงจะยืนยันได้ 100%
+3. **Feed จริง (tatnews.org/feed/) แทบไม่มีรูปในข่าวเลย ส่วนใหญ่โชว์ placeholder** — **เห็นด้วยว่าไม่ใช่บั๊ก** ตรวจสอบ `docs/dev-notes.md` "รอบ 7" และ `newsService.ts` บรรทัด 9-16 แล้ว เป็นข้อจำกัดของ feed ต้นทางจริง ไม่ใช่ logic ของแอปผิด — `NewsCard.tsx`/`NewsLoadingSkeleton.tsx` แสดง placeholder ถูกต้องตาม US-32 AC2 ทุกกรณีที่ทดสอบในรอบนี้ (ไม่พบรูปที่ควรมีแต่ดันโชว์ placeholder ผิด หรือ broken image ใดๆ)
+
+### สรุปรอบนี้
+ผ่านครบ **20/21 AC** ของ US-28 ถึง US-32 (นับ AC ย่อยตามที่ requirements.md ระบุ) — AC ที่เหลือ (US-31 AC2) เป็น coverage gap ที่ยอมรับได้ตามข้อจำกัดเครื่องมือ ไม่ใช่ fail และไม่มี evidence ว่าพัง พบบั๊กใหม่ 1 รายการ severity **Medium** (Cache Indicator แสดงผิดเงื่อนไขตาม design-spec เวลาเปิดแอปซ้ำภายใน TTL ปกติ) ที่ programmer ยังไม่เคย flag ไว้ — ไม่ block การใช้งานหลักและไม่ทำให้ AC ใด fail ตรงๆ (เพราะ AC ของ US-30 ไม่ได้เขียนไว้ชัดว่า "ห้ามโชว์ indicator ตอน cache ยังสด" แต่ design-spec ที่ทีม UIUX ออกแบบไว้ระบุเงื่อนไขชัดกว่า requirements.md) แนะนำให้ programmer แก้ก่อน release จริงเพราะกระทบ first impression ของฟีเจอร์ใหม่ทุกครั้งที่ผู้ใช้เปิดแอปซ้ำ regression รวม 64/64 suites ผ่าน (ไม่มี suite ใดถูกแก้ไข/ลบจากรอบนี้) และ `tsc --noEmit` ผ่านสะอาด ตรงกับที่ programmer รายงาน
+
+---
+
+## รอบ 9: Animation/Motion Upgrade (US-34, T119-T122, ตรวจสอบอิสระโดย Tester)
+
+**ขอบเขต:** ตรวจสอบอิสระว่า Animation/Interaction Feedback upgrade (US-34, dev-notes.md "รอบ 14") ตรงตาม AC ทั้ง 6 ข้อจริงหรือไม่ เขียน integration/e2e test ชุดใหม่ 4 ไฟล์ (`src/__tests__/qa-round-us34/`) แยกจาก unit/source-guard test เดิมของ programmer (`src/navigation/AppNavigator.test.tsx`, `src/__tests__/motion/t120EntranceAnimationWiring.test.ts`, `src/components/PressableScale.test.tsx`, `src/hooks/useReduceMotion.test.ts`) — ไม่แก้ไข/ลบ test เดิมเลย มุมที่ต่างจาก test เดิมของ programmer (ซึ่งส่วนใหญ่เป็น source-text regex guard):
+
+1. `screenTransitionRegressionAndInterrupt.test.tsx` — เดิน `AppNavigator` จริงเต็มระบบ (ไม่ mock navigator) ผ่านทั้ง 3 จุด transition ที่ AC1 ระบุ, ยิง rapid-press ซ้ำๆ แบบไม่รอ (`fireEvent.press` ติดกันไม่มี `waitFor` คั่น) ทั้งที่ปุ่ม back และปุ่มสลับแท็บ เพื่อพิสูจน์ AC5 (interrupt ได้จริง ไม่ค้าง) ด้วยพฤติกรรมจริงแทนการอ่านโค้ดเฉยๆ
+2. `entranceAnimationRealRender.test.tsx` — ใช้ real `EntranceFadeItem`/`useEntrancePlayedOnce`/`useMountFadeIn` (ไม่ mock) แล้วตรวจ **React fiber tree จริงที่ mount ออกมา** ผ่าน fiber-walk helper ที่เขียนเอง (RNTL v14 ของโปรเจกต์นี้ตัด `UNSAFE_getByType`/`UNSAFE_getAllByType` ออกแล้ว ยืนยันจากการอ่าน `node_modules/@testing-library/react-native/dist/render.d.ts` โดยตรง) — พบบั๊กสำคัญ ดูหัวข้อ "บั๊กที่พบ" ข้อ 1
+3. `pressFeedbackEmphasizedRealRender.test.tsx` — render จุดจริงตาม AC3 (`LandmarkCard`, `NewsCard`, `ProvinceDetailScreen`) แล้วเดิน fiber `.return` chain ขึ้นจาก text ที่มองเห็นจริงเพื่ออ่านค่า `variant` prop ที่ `PressableScale` แต่ละจุด **ถูก mount จริง** (ไม่ใช่แค่ grep ข้อความในไฟล์) — พบ gap ดูหัวข้อ "บั๊กที่พบ" ข้อ 2
+4. `reduceMotionWiring.test.tsx` — mock `useReduceMotion` เป็น spy แล้ว render ทุกจุดจริงที่ design-spec "หลักการร่วม: Reduce Motion" ระบุ (6 จุด) ยืนยัน call-count จริง + ยืนยัน fallback ที่สังเกตได้จริงทาง rendered style (`EntranceFadeItem`/`HeaderProgress`) ต่างจาก unit test เดิมของ programmer ที่ครอบคลุมแค่ทีละ component
+
+### ผลรัน Test
+- `npx jest src/__tests__/qa-round-us34` → **PASS 4/4 suites, 31/31 tests**
+- `npx jest` (เต็มชุด รวม unit + integration/e2e เดิมทั้งหมด + ของใหม่รอบนี้) → **PASS 75/75 suites, 418/419 tests, skip 1** (skip เดิม T30, ไม่เกี่ยวกับรอบนี้) — **ไม่มี regression ต่อ US-1 ถึง US-32 แม้แต่รายการเดียว** (ตรงกับ AC4)
+
+### US-34: ยกระดับ Animation และ Interaction Feedback
+- [x] AC1 (screen transition ชัดเจน 3 จุด: สลับแท็บ, เปิด ProvinceDetail, เปิด AddEntry) — **PASS** ยืนยันทั้ง (ก) functional: push/switch จริงยังพาไปหน้าที่ถูกต้องด้วยข้อมูลเดิมทุกประการ และ (ข) static cross-check ค่า config (`slide_from_right`/280ms, `slide_from_bottom`/300ms/modal, cross-fade 180ms) ตรงตาม design-spec §1 — **หมายเหตุข้อจำกัด**: native-stack's `animation` prop เป็น native OS-level transition ที่ RNTL/jest เรนเดอร์แล้ว "เห็น" การเคลื่อนไหวจริงด้วยสายตาไม่ได้ (เหมือนข้อจำกัดเดิมที่เคยบันทึกไว้กับ T108/`expo-web-browser`) — เป็น **coverage gap ที่ยอมรับได้** ต้องอาศัย manual QA บนอุปกรณ์จริงเพื่อยืนยันความ "ชัดเจน" ในเชิงสายตา 100%
+- [ ] AC2 (entrance animation ของ list หลัก 3 จุด: LandmarkList/NewsScreen/StatsScreen timeline) — **FAIL (พบบั๊กจริง)** — ดูรายละเอียดเต็มในหัวข้อ "บั๊กที่พบ" ข้อ 1 ด้านล่าง สรุปสั้น: `useEntrancePlayedOnce`'s ref ที่ควร "เล่นครั้งเดียว" กลับทำให้ animation ถูกตัดจบก่อนเวลาอันควรจาก re-render ที่ไม่เกี่ยวข้องซึ่งเกิดขึ้นแทบจะทันทีหลัง mount ยืนยันด้วย isolated repro ที่แยกสาเหตุได้ชัดเจน (ไม่ใช่แค่ข้อจำกัดเครื่องมือทดสอบ)
+- [x] AC3 (press feedback ชัดเจนกว่าเดิมในจุดที่ระบุ, ไม่ขยาย scope เกิน) — **PASS บางส่วน / มี gap** — `LandmarkCard` (ทั้งการ์ด+ปุ่มเช็คอิน) และ `NewsCard` มี `variant="emphasized"` จริงตามที่ mount ออกมา (ยืนยันด้วย real fiber prop, ไม่ใช่แค่ grep), จุดนอก scope (view-mode toggle, category chip, ปุ่ม back ของ ProvinceDetail/Settings) ยังคง variant เดิมถูกต้อง ไม่ขยาย scope — **แต่พบ gap ที่ปุ่ม "+ เพิ่มบันทึกใหม่" ตัวที่ 2** ดูหัวข้อ "บั๊กที่พบ" ข้อ 2
+- [x] AC4 (functional behavior เดิมของ US-1–US-32 ไม่เปลี่ยน) — **PASS** ยืนยันด้วย regression เต็มชุด 75/75 suites, 418/419 tests (skip 1 เดิม) ไม่มี test เดิมพังแม้แต่ตัวเดียว
+- [x] AC5 (กดข้าม/interrupt animation ได้เสมอ ไม่บล็อกผู้ใช้) — **PASS** ยืนยันด้วยพฤติกรรมจริง: กดปุ่ม back ทันทีหลัง push (ไม่รอ) ยังกลับได้ปกติ, กดสลับแท็บรัวๆ ติดกัน (Map→News→Map→News ไม่รอระหว่างกด) ไม่ throw และจบที่แท็บที่กดล่าสุดถูกต้อง, กดแท็บที่ focus อยู่แล้วซ้ำไม่ crash/double-nav — ตรงกับที่ตรวจสอบโค้ดเพิ่มเติมว่าไม่มี `disabled`/`pointerEvents="none"` ผูกกับ state ระหว่าง "กำลังเล่น animation" จุดใดเลย
+- [x] AC6 (Reduce Motion / animation config ถูกเพิ่มจริงไม่ใช่ default เดิม) — **PASS** ยืนยันด้วย 2 ชั้น: (ก) call-count จริงว่า `useReduceMotion()` ถูกเรียกจริงตอน render ทุกจุดที่ design-spec ระบุครบ 6 จุด (`EntranceFadeItem`, `useMountFadeIn` ผ่าน `HeaderProgress`/`Legend`/`Map3D`, `PressableScale`, `NewsCard`, `AppNavigator` ทั้ง `MapStackNavigator`+tab cross-fade wrapper) (ข) ค่าที่ return จริงเปลี่ยน rendered output จริงสำหรับจุดที่เครื่องมือสังเกตได้ (`EntranceFadeItem`: opacity/translateY เริ่มต้นต่างกันจริงระหว่าง reduceMotion true/false, `HeaderProgress`: opacity เริ่มต้นต่างกันจริง)
+
+### บั๊กที่พบ (ใหม่ในรอบนี้ — ไม่เคยถูก flag มาก่อน)
+
+**บั๊ก 1 (Severity: High — กระทบ AC2 โดยตรง, มีโอกาสสูงที่ entrance animation ของ list หลักแทบทุกจุดจะไม่ถูกมองเห็นจริงหรือถูกตัดจบก่อนเวลา):** Entrance animation ของ `LandmarkList`/`NewsScreen` (และมีความเสี่ยงเดียวกันกับ `StatsScreen` เมื่อ render ผ่าน navigator จริงตามที่แอปใช้งานจริงเสมอ) **มีความเสี่ยงสูงที่จะถูกตัดจบก่อนที่ animation จะเล่นจบ (หรืออาจไม่ทันถูกมองเห็นเลย)** เพราะ `useEntrancePlayedOnce`'s `hasPlayedRef` flip เป็น `true` ทันทีหลัง render pass แรกที่ data พร้อม แต่ทั้ง `LandmarkList.tsx` และ `NewsScreen.tsx` ต่างมี effect ที่ยิง re-render ที่ **ไม่เกี่ยวข้องกับ entrance animation เลย** ตามหลังติดๆ กันโดยไม่มีทางเลี่ยง:
+  - `LandmarkList.tsx`: effect sync จังหวัด (บรรทัด ~77-83) เรียก `setLandmarks(getLandmarksForProvince(provinceId))` ทุกครั้งที่ mount **โดยไม่มีเงื่อนไข** — และ `getLandmarksForProvince` ใช้ `LANDMARKS.filter(...)` (`src/data/thailand-landmarks.ts:1283-1285`) ซึ่ง**คืน array reference ใหม่ทุกครั้งที่เรียก แม้เนื้อหาจะเหมือนเดิมทุกประการ** — React จึงตัดสินใจ re-render ทันทีเพราะ reference ต่างกัน (ไม่ใช่ deep-equal check) ซ้ำยังมี effect โหลด Wikipedia (บรรทัด ~143-145) ที่เรียก `setIsFetchingWiki(true)` แบบ synchronous ทันทีในทุก mount เช่นกัน — ทั้งสอง effect นี้ registered หลัง effect ของ `useEntrancePlayedOnce` แต่ในลำดับ hook execution เดียวกัน (same initial effect-flush) ทำให้ render pass ถัดไป (ที่เกิดขึ้นแทบจะทันที ก่อน animation จะมีโอกาสเล่นจบ 260ms/580ms ตามสเปก) คำนวณ `shouldPlayEntrance` เป็น `false` แล้ว unmount `EntranceFadeItem` ทิ้งไปเป็นการ์ดธรรมดาที่ไม่มี animation ใดๆ
+  - `NewsScreen.tsx`: หลัง render ที่ data พร้อม (items ครบ) ยังมี `await writeNewsCache(fresh)` ตามด้วย `setCacheTimestamp(fetchedAt)` (บรรทัด ~79-80) เป็น re-render ที่สองแยกต่างหากซึ่ง**รับประกันว่าเกิดขึ้นจริงทุกครั้ง**หลัง render แรกที่ entrance animation ควรเล่น
+  - **ยืนยันด้วย isolated repro แยกสาเหตุชัดเจน** (`entranceAnimationRealRender.test.tsx` เทส "BUG repro (isolated, minimal)"): list แบบเดียวกันทุกประการแต่ **ไม่มี** effect ที่ไม่เกี่ยวข้อง → wrapper รอดถึง settle (control, ตรงตามสเปก); list ที่มี effect ที่ไม่เกี่ยวข้อง (จำลอง pattern เดียวกับ `LandmarkList`) → wrapper หายไปตั้งแต่ก่อน settle เสมอ — พิสูจน์ว่านี่คือกลไกจริงในโค้ด ไม่ใช่แค่ข้อจำกัดของเครื่องมือทดสอบ
+  - **StatsScreen เป็นกรณีที่ต่างออกไปเล็กน้อย**: ทดสอบแยกยืนยันแล้วว่า **โค้ดของ `StatsScreen.tsx`/`JournalContext.tsx` เองไม่มีปัญหานี้** (render แบบ isolated ไม่ผ่าน navigator → wrapper รอดถึง settle ปกติ) **แต่** เมื่อ render ผ่าน `NavigationContainer`/`Stack.Navigator` จริง (ซึ่งเป็นวิธีที่แอปจริงใช้งานเสมอ ไม่มีทางเลี่ยง) พบอาการเดียวกัน (wrapper หายก่อน settle) — คาดว่ามาจาก re-render ที่ react-navigation เองทำตอน mount หน้าจอ (ยังไม่ได้ไล่โค้ดของ react-navigation ลึกถึงสาเหตุที่แน่ชัด 100%) จึงมีความเสี่ยงเดียวกันในทางปฏิบัติแม้ root cause จะต่างจาก 2 จุดแรก
+  - **ข้อจำกัดที่ต้องระบุให้ชัด**: เครื่องมือทดสอบในสภาพแวดล้อมนี้ (`@testing-library/react-native` v14's `render()` ที่ await จน effect settle หมดก่อน return, และ `react-native-reanimated/mock` ที่ resolve animation แบบ synchronous) ทำให้ **พิสูจน์ไม่ได้ 100% ว่า animation หายไปกี่ ms หลัง mount จริงบนอุปกรณ์จริง** (อาจจะเห็นวูบเดียวแล้วหาย หรืออาจไม่ทันเห็นเลยขึ้นกับความเร็ว JS thread ของอุปกรณ์) — แต่ **กลไกเชิงโค้ด (source-level) ที่ทำให้เกิดปัญหานี้เป็นข้อเท็จจริงที่ยืนยันได้แน่นอน 100%** ไม่ขึ้นกับข้อจำกัดของเครื่องมือทดสอบ (`.filter()` คืน array ใหม่เสมอ + effect ที่ไม่มีเงื่อนไขยิง setState ทุก mount เป็นข้อเท็จจริงจากการอ่านโค้ดตรงๆ) แนะนำให้ทดสอบยืนยันภาพจริงบนอุปกรณ์อีกครั้งก่อน sign-off แต่ควรถือเป็น**บั๊กที่ต้องแก้** ไม่ใช่แค่ coverage gap เฉยๆ
+  - **ข้อเสนอแนะ (ไม่ใช่หน้าที่ Tester แก้เอง):** `useEntrancePlayedOnce` ควร "ล็อก" การตัดสินใจ `shouldPlayEntrance=true` ให้คงอยู่ตลอดจนกว่า animation ของรายการที่กำลังแสดงอยู่จะเล่นจบจริง (เช่นด้วย `useState` แทน `useRef`+conditional-render ธรรมดา หรือ derive จาก "data epoch/key" แทนการ recompute ทุก re-render) แทนที่จะปล่อยให้ re-render ใดๆ ก็ตาม (แม้ไม่เกี่ยวกับข้อมูลของ list) พลิกค่ากลับเป็น `false` ทันที
+
+**บั๊ก 2 (Severity: Medium — ตรงตาม AC3 ในทางเทคนิค literal-wise แต่พลาด user-facing scenario ที่พบบ่อยที่สุด):** ปุ่ม **"+ เพิ่มบันทึกใหม่"** ใน `ProvinceDetailScreen` มีอยู่ **2 จุดจริง** ที่แสดงข้อความเดียวกันเป๊ะและไปหน้า AddEntry เหมือนกัน แต่ได้รับการ enhance ไม่เท่ากัน:
+  - ปุ่ม CTA ที่ header (แสดงเมื่อจังหวัดนั้นมี entry อยู่แล้ว ≥1 รายการ, `ProvinceDetailScreen.tsx:89`) — **มี** `variant="emphasized"` ตรงตาม AC3
+  - ปุ่มใน `EmptyState` component (แสดงเมื่อจังหวัดนั้น**ยังไม่มี entry เลย** — สถานการณ์แรกที่ผู้ใช้ใหม่ทุกคนจะเจอก่อนเสมอเมื่อเปิดจังหวัดที่ยังไม่เคยบันทึก, `ProvinceDetailScreen.tsx:100-105` ผ่าน `EmptyState.tsx:21`) — **ไม่มี** `variant`, ยังคง press feedback แบบเดิม (`default`)
+  - **ยืนยันด้วย real render**: `pressFeedbackEmphasizedRealRender.test.tsx` เทส "AC3 GAP" — render `ProvinceDetailScreen` จริงด้วยจังหวัดที่ยังไม่มี entry แล้วอ่านค่า `variant` prop จริงจาก fiber ของปุ่มที่มองเห็น พบว่าเป็น `undefined` (ไม่ใช่ `'emphasized'`)
+  - **สาเหตุ**: `EmptyState.tsx` เป็น component กลางที่ใช้ร่วมกันหลายหน้า (Province Detail/Stats/News) โปรแกรมเมอร์ตั้งใจไม่แตะ component นี้เพื่อไม่ให้กระทบ caller อื่น (เช่นปุ่ม "ไปที่แผนที่" ใน StatsScreen) ซึ่งเป็นการตัดสินใจที่สมเหตุสมผลเพื่อไม่ขยาย scope เกิน — แต่ผลข้างเคียงคือปุ่มที่มีชื่อ/ข้อความตรงกับที่ AC3 ระบุเป๊ะ ("+ เพิ่มบันทึกใหม่") กลับไม่ได้ enhance ใน scenario ที่ผู้ใช้จะเจอบ่อยที่สุด (จังหวัดใหม่ที่ยังไม่มีบันทึก)
+  - **ข้อเสนอแนะ (ไม่ใช่หน้าที่ Tester ตัดสินใจ):** เสนอให้ PM/Programmer พิจารณาว่า AC3 ควรครอบคลุมทั้ง 2 จุดของปุ่มนี้หรือไม่ (ตีความตามตัวอักษร/label ที่ AC3 ระบุ ไม่ใช่ตาม code path) — ถ้าใช่ อาจต้องเพิ่ม prop ให้ `EmptyState` เลือก `variant` ของปุ่ม action ได้ (opt-in, ไม่กระทบ caller อื่นที่ไม่ระบุ) แล้ว pass `variant="emphasized"` เฉพาะจาก `ProvinceDetailScreen`'s call site
+
+### หมายเหตุข้อจำกัดเครื่องมือทดสอบที่ต้องระบุชัด (ไม่ใช่บั๊ก)
+- ไม่มี physical device/emulator ในสภาพแวดล้อมนี้ (ข้อจำกัดเดิมที่บันทึกไว้ตั้งแต่ T30/T108) — จึงยืนยัน "ความลื่นไหล"/"ไม่ jank" ของ animation ทุกจุด, ความชัดเจนทางสายตาของ screen transition (AC1), และระยะเวลาที่แท้จริงที่ entrance animation หายไปในบั๊ก 1 (กี่ ms หลัง mount) ด้วยสายตาบนอุปกรณ์จริงไม่ได้ 100% — เสริมด้วย static/structural verification (อ่านโค้ด + isolated repro ที่แยกสาเหตุได้ชัดเจน) แทนเท่าที่ทำได้ตามที่ orchestrator ให้แนวทางไว้
+- `@testing-library/react-native` v14 ของโปรเจกต์นี้ตัด `UNSAFE_getByType`/`UNSAFE_getAllByType` ออกจาก public API แล้ว (ยืนยันจากการอ่าน type declaration ตรงๆ) — เขียน fiber-walk helper ทดแทนเอง (เดินผ่าน `TestInstance.unstable_fiber`'s `.child`/`.sibling`/`.return`) ยืนยันความถูกต้องของ helper นี้ด้วย sanity-check test แยกก่อนนำไปใช้จริงในทุกไฟล์
+
+### สรุปรอบนี้
+US-34 ผ่าน **4/6 AC เต็ม** (AC1 มี coverage gap ที่ยอมรับได้, AC4/AC5/AC6 ผ่านเต็ม) และ **1/6 AC fail จริง (AC2)** จากบั๊ก severity **High** ที่พบใหม่ (entrance animation ของ list หลักเสี่ยงถูกตัดจบก่อนเวลาโดย re-render ที่ไม่เกี่ยวข้อง ยืนยันด้วย isolated repro ไม่ใช่แค่ข้อจำกัดเครื่องมือ) อีก 1 จุด (AC3) ผ่านเป็นส่วนใหญ่แต่มี gap severity **Medium** (ปุ่ม "+ เพิ่มบันทึกใหม่" 1 ใน 2 จุดที่มีข้อความตรงกันไม่ได้ enhance) — ไม่มี regression ต่อ US-1 ถึง US-32 เลยแม้แต่รายการเดียว (75/75 suites, 418/419 tests, skip 1 เดิม) แนะนำให้ orchestrator ส่งทั้ง 2 ประเด็นกลับให้ programmer แก้ก่อนถือว่า US-34 เสร็จสมบูรณ์ตาม AC จริง โดยเฉพาะบั๊ก 1 (AC2) ที่มีผลกระทบสูงต่อความรู้สึก "แอป redesign ใหม่จริง" ซึ่งเป็นเป้าหมายหลักของ US-34 ทั้งหมด
+
+---
+
+## รอบ Verify ที่ 2 (US-34 AC2 บั๊ก 1 — ตรวจสอบอิสระการแก้ของ programmer หลัง qa-result.md รอบ 9)
+
+**ขอบเขต:** ตรวจสอบอิสระว่าการแก้ `src/hooks/useEntrancePlayedOnce.ts` (dev-notes.md "ประวัติการแก้บั๊ก — US-34 ... รอบ 2") ทำให้ AC2 ผ่านจริงหรือไม่ **โดยไม่เชื่อคำอ้างของ programmer เฉยๆ** โดยเฉพาะ 2 จุดที่น่าสงสัยที่สุด: (1) programmer เป็นคนแก้ assertion ในไฟล์ test ของ tester เอง (2) เคส "ผ่าน NavigationContainer จริง" ยัง `count = 0` เหมือนเดิมแต่อ้างว่าเป็น "ข้อจำกัดเครื่องมือ"
+
+### 1) ตรวจโค้ด `useEntrancePlayedOnce.ts` ด้วยตัวเอง (ไม่เชื่อ comment ในไฟล์เฉยๆ)
+อ่าน logic บรรทัดต่อบรรทัด: `armedRef`/`prevHasDataRef` เทียบ `hasData` กับค่าก่อนหน้าแบบ synchronous ระหว่าง render (ไม่มี `useEffect` เลย) — เมื่อ `hasData` เปลี่ยนค่าจริง (`false→true` หรือ `true→false`) เท่านั้นที่ `armedRef.current` จะถูกเซ็ตใหม่ ตราบใดที่ `hasData` ยังเป็น `true` ต่อเนื่อง ค่าที่ return จะไม่เปลี่ยนไม่ว่าจะมี re-render กี่ครั้งจากสาเหตุอะไรก็ตาม — ตรงตาม root cause ที่ qa-result.md รอบ 9 ระบุไว้จริง (ของเดิมผูกกับ "มี re-render เกิดขึ้นหรือยัง" ของใหม่ผูกกับ "ค่า hasData เปลี่ยนจริงหรือยัง") **ยืนยันว่าเป็นการแก้ root cause จริง ไม่ใช่แค่ patch ผิวๆ**
+
+ตรวจโค้ดจริงของ `LandmarkList.tsx:77-83` และ `NewsScreen.tsx:79-80` (ตัวก่อ re-render ที่ไม่เกี่ยวข้องเดิม) — **ยังคงอยู่เหมือนเดิมทุกประการ** (`setLandmarks(getLandmarksForProvince(provinceId))` แบบไม่มีเงื่อนไขทุก mount ที่ `LandmarkList.tsx`, `writeNewsCache`→`setCacheTimestamp` ที่ `NewsScreen.tsx`) ตรงตามที่ programmer รายงานว่า "ไม่ต้องแก้ 2 ไฟล์นี้เลย" — สำคัญเพราะแปลว่า test ที่ยืนยันว่า animation รอดจาก re-render เหล่านี้ **กำลังทดสอบสถานการณ์จริงที่ยังเกิดขึ้นอยู่จริง** ไม่ใช่สถานการณ์ที่ถูกกำจัดไปแล้วโดยวิธีอื่น (ถ้า programmer ลบ effect เหล่านั้นไปแทน การพิสูจน์ "ไม่ถูกตัดจบจาก re-render" ก็จะไม่มีความหมายเพราะไม่มี re-render ให้ต้านทานอีกต่อไป)
+
+### 2) ตรวจการแก้ assertion ในไฟล์ test ของตัวเอง (`entranceAnimationRealRender.test.tsx`) ว่าสมเหตุสมผลจริงหรือไม่
+Programmer แก้ 2 assertion จาก `toBe(0)` → `toBe(2)`/`toBe(4)` ในเคส "regression guard" และ "LandmarkList" — ตรวจสอบแล้วว่า **นี่คือทิศทางที่ถูกต้อง ไม่ใช่การลด severity เพื่อให้ผ่านง่าย**: assertion เดิม `toBe(0)` เขียนขึ้นเพื่อ **บันทึกพฤติกรรมบั๊ก** (entrance wrapper หายไปก่อน settle) ไว้เป็นหลักฐาน — เมื่อบั๊กถูกแก้จริงแล้ว ค่าที่ถูกต้องตาม spec (design-spec.md §2: "รายการต้องมี entrance animation ตอนข้อมูลโหลดเสร็จ") คือ wrapper ต้องรอดถึง settle (`toBe(2)`/`toBe(4)` ตรงกับจำนวนรายการจริง) — การไม่แก้ assertion นี้หลังบั๊กถูกแก้แล้วต่างหากที่จะทำให้ test เป็น false-negative ค้างอยู่ ตรวจสอบเพิ่มด้วยการรัน `useEntrancePlayedOnce.test.ts` (unit test แยก คนละไฟล์ คนละมุมจาก integration test) พบว่า assertion ใหม่ยืนยัน contract เดียวกัน ("stays true across re-renders while hasData unchanged") สอดคล้องกันทั้ง 2 ระดับ ไม่ใช่ assertion ที่ถูกปรับแค่ไฟล์เดียวเพื่อเลี่ยงปัญหา — **สรุป: การแก้ assertion สมเหตุสมผล ไม่ใช่การเขียน test ให้ผ่านง่ายๆ**
+
+รันไฟล์นี้ซ้ำอิสระ: **9/9 PASS** ตรงกับที่ programmer รายงาน
+
+### 3) ตรวจสอบอิสระเรื่อง "NavigationContainer count=0" — ไม่เชื่อคำอธิบาย "ข้อจำกัดเครื่องมือ" ของ programmer เฉยๆ
+เขียน test ใหม่อิสระ 5 ไฟล์ (`src/__tests__/qa-round-us34/navigatorFiberWalkLimitationProbe.test.tsx`, `navigatorFiberWalkLimitationProbe2.test.tsx`, `newsScreenNavigatorEntranceDebug.test.tsx`, `newsScreenNavigatorFiberDump.test.tsx`, `statsScreenNavigatorGroundTruth.test.tsx`) เพื่อพิสูจน์เอง ไม่พึ่ง instrumentation ของ programmer:
+
+- **ก่อนอื่นพบว่าคำอธิบายเชิงเทคนิคที่ dev-notes.md ให้ไว้ ("Screen/Freeze wrapper ของ react-navigation บล็อกการเดิน fiber โดยทั่วไป") ไม่แม่นยำ**: สร้างหน้าจอ bug-free จำลอง (unconditional `EntranceFadeItem`, ไม่มี ternary/hook ใดๆ ที่จะพังได้) ทั้งแบบ plain `View` และแบบ `FlatList` (โครงสร้างเดียวกับ `NewsScreen` เป๊ะ รวม `RefreshControl`/`ItemSeparatorComponent`/`SafeAreaView` และ 3-screen navigator shape เดียวกัน) แล้ว mount ผ่าน `NavigationContainer`/`Stack.Navigator` เดียวกัน — **ทั้งคู่ถูกนับถูกต้อง (count=2) ไม่ใช่ 0** (`navigatorFiberWalkLimitationProbe.test.tsx`, `navigatorFiberWalkLimitationProbe2.test.tsx`) แปลว่า "navigator wrapper" เพียงอย่างเดียวไม่ใช่คำอธิบายที่เพียงพอ
+- ตรวจสอบต่อด้วยการ spy ที่ hook จริง (`jest.requireActual` ห่อ `useEntrancePlayedOnce` เพื่อ log ทุก call จริงจาก `NewsScreen` ที่ mount ผ่าน navigator จริง, `newsScreenNavigatorEntranceDebug.test.tsx`) — พบว่า hook ถูกเรียกแค่ 2 ครั้งตลอดการทดสอบ (`hasData=false→returned=false`, แล้ว `hasData=true→returned=true`) **ไม่มีครั้งที่ 3 ที่พลิกกลับเป็น `false`** ยืนยันว่า `shouldPlayEntrance` เป็น `true` จริงตอน settle ไม่ใช่แค่คำอ้างของ programmer
+- ตรวจให้แน่ชัดที่สุดด้วย **`screen.debug()`/`screen.toJSON()`** (RNTL official API มาตรฐาน ไม่ใช่ fiber-walk แบบ custom ที่โปรเจกต์นี้เขียนเอง) — เห็นชัดเจนว่า `<View style={{opacity: 0}}>` (ลายเซ็นเฉพาะของ `EntranceFadeItem`'s `Animated.View` ก่อนแอนิเมชันเริ่ม) ห่อการ์ดข่าวทั้ง "ข่าว A" และ "ข่าว B" อยู่จริงเมื่อ mount ผ่าน `NavigationContainer` จริง — เขียนเป็น assertion ถาวรใน `newsScreenNavigatorFiberDump.test.tsx`/`statsScreenNavigatorGroundTruth.test.tsx` (นับ host node ที่มี `opacity`+`transform translateY` ผ่าน `toJSON()`) ได้ผล **`count=2` ทั้ง NewsScreen และ StatsScreen** เมื่อ mount ผ่าน navigator จริง — **ยืนยันด้วยวิธีที่เป็นกลางที่สุดเท่าที่ทำได้ในสภาพแวดล้อมนี้ว่า entrance wrapper รอดจริง ไม่ใช่แค่คำอ้าง**
+- **สรุปประเด็นนี้**: ข้อสรุปของ programmer ที่ว่า "`count=0` ไม่ใช่บั๊กที่หลงเหลือ" **ถูกต้อง** และตรวจสอบอิสระยืนยันแล้วด้วยวิธีที่ไม่พึ่งพา custom fiber-walk เลย — แต่ **คำอธิบายเชิงเทคนิคที่ระบุไว้ใน dev-notes.md ("Screen/Freeze wrapper บล็อกการเดินทั่วไป") ไม่แม่นยำ 100%** (พิสูจน์แล้วว่าหน้าจอทั่วไปผ่าน wrapper เดียวกันไม่โดนบล็อก) สาเหตุที่แท้จริงที่ custom fiber-walk พลาดเฉพาะ `NewsScreen`/`StatsScreen` จริงยังไม่สรุปได้ 100% (น่าจะเกี่ยวกับ fiber ที่ถูกแทนที่ระหว่าง double-buffering หลัง state update จริงของ `loadingFirst`/`loading` ที่หน้าจอสังเคราะห์ที่ใช้ทดสอบไม่มี) — แต่ไม่กระทบข้อสรุปสุดท้ายเพราะพิสูจน์ด้วย ground truth (`toJSON()`) แยกออกมาแล้วว่าไม่ใช่บั๊กจริง ควรบันทึกไว้เป็นความรู้สำหรับทีมว่าอย่าอ้างคำอธิบายนี้ซ้ำโดยไม่ตรวจสอบเพิ่มถ้าเกิดปัญหาคล้ายกันในอนาคต
+
+### ผลรัน Test (Verify รอบ 2)
+- `npx jest src/__tests__/qa-round-us34/entranceAnimationRealRender.test.tsx src/hooks/useEntrancePlayedOnce.test.ts` → **PASS 13/13** (9 integration + 4 unit)
+- `npx jest src/__tests__/qa-round-us34/` (รวมไฟล์ verify ใหม่ 5 ไฟล์ของ tester รอบนี้) → **PASS ทั้งหมด**
+- `npx jest` เต็มชุด (รวมทุกไฟล์เดิม + ไฟล์ verify ใหม่ 5 ไฟล์ที่เพิ่มในรอบนี้) → **PASS 80/80 suites, 429/430 tests, skip 1 เดิม (ไม่เกี่ยวข้อง), 0 failed** — ไม่มี regression ต่อ US-1–US-32/US-33 หรือ US-34 AC อื่นแม้แต่รายการเดียว
+
+### สรุปผลตัดสิน AC2 (Verify รอบ 2)
+- [x] **AC2 — PASS จริง** (เปลี่ยนจาก FAIL ในรอบ 9 เป็น PASS) ตรวจสอบอิสระครบทั้ง 3 มุมที่ต้องสงสัย (root cause ในโค้ด, ความสมเหตุสมผลของการแก้ assertion, และข้อสงสัยเรื่อง NavigationContainer) แล้วสรุปว่าการแก้ของ programmer แก้ root cause จริง ไม่ใช่แค่ทำให้ test ผ่านง่ายขึ้น
+- บั๊ก 2 (AC3, ปุ่ม "+ เพิ่มบันทึกใหม่" ใน `EmptyState.tsx`) — **ไม่อยู่ใน scope ของรอบ verify นี้** (QA รอบ 9 ส่งกลับให้ PM ตัดสินใจ scope ก่อน ไม่ใช่ของ programmer) ยังคงค้างอยู่ตามเดิม รอ PM
+- **สรุปรวม US-34**: ผ่านครบ 5/6 AC เต็ม (AC1 ยังมี coverage gap ที่ยอมรับได้เหมือนเดิม, AC2 ผ่านแล้วหลังแก้, AC4/AC5/AC6 ผ่านเต็ม) เหลือเพียงบั๊ก 2 (AC3, severity Medium) ที่รอ PM ตัดสินใจ scope — ไม่มี P0 หรือ regression ใดๆ ถูกกระทบ
+
+---
+
+# รอบ 16: Color Palette & Layout Redesign เฟส 1 (US-35 Decision Gate + US-36 HomeScreen, ตรวจสอบอิสระโดย Tester)
+
+> เขียนต่อท้ายรายงานทุกรอบก่อนหน้าโดยไม่แก้ไขเนื้อหาด้านบน ตามขอบเขตงานของ Tester
+
+## สรุปรอบนี้
+
+**Automated test run (`npx jest` เต็มชุด รวมทั้งโปรเจกต์ หลังเพิ่มชุดทดสอบของ Tester รอบนี้):**
+Test Suites: **83 total, 82 passed, 1 failed** | Tests: **480 total, 478 passed, 1 skipped (เดิม ไม่เกี่ยวข้อง), 1 failed**
+
+- **Baseline ของ programmer (รันซ้ำอิสระโดยไม่รวมไฟล์ใหม่ของ Tester รอบนี้ — `npx jest --testPathIgnorePatterns qa-round15`):** **81/81 suites ผ่าน, 435 passed + 1 skip, 0 failed** — ตรงกับตัวเลขที่ dev-notes.md "รอบ 15" อ้างไว้เป๊ะ ยืนยันแล้วว่าไม่ได้โม้
+- **ของ Tester เพิ่มใหม่ในรอบนี้ (independent, คนละไฟล์คนละมุมจาก `src/__tests__/theme/noHardcodedHexRound15.test.ts` ของ programmer):**
+  - `src/__tests__/qa-round15/us35TokenAndContrastAudit.test.ts` (35 tests, **34 pass / 1 fail-by-design**) — คำนวณ WCAG contrast เองจากสูตร relative-luminance ตั้งแต่ต้น (ไม่ share โค้ดกับ dev-notes.md หรือ test ของ programmer เลย), สแกน hex/rgba + CSS named-color อิสระใน 6 ไฟล์, ตรวจ semantic hue family, ตรวจ before/after delta
+  - `src/__tests__/qa-round15/homeScreenVisualIdentityAndRegression.test.tsx` (9 tests, **9/9 pass**) — mount HomeScreen จริงผ่าน Navigator จริง เดิน render tree จริง (toJSON()) ยืนยัน token ใหม่ถูกใช้จริง runtime ไม่ใช่แค่ import ใน source, และยืนยัน prop contract เดิมของ Map3D/ProvinceTile3D ไม่พัง
+
+**1 test ที่ fail เป็นการค้นพบบั๊กจริงโดยตั้งใจ ไม่ใช่ test เขียนผิด** — ดูหัวข้อ "บั๊กที่พบ" ด้านล่าง (accent-on-background contrast ของลิงก์ "สถิติ")
+
+**Static check:** `npx tsc --noEmit` — ผ่าน 0 errors (รวมไฟล์ test ใหม่ของ Tester ด้วย)
+
+---
+
+## รายละเอียดตาม Acceptance Criteria
+
+### US-35: กำหนดทิศทาง Color Palette ใหม่ทั้งระบบผ่าน Design Token เดียว
+
+- [x] AC1 (Decision Gate ปิดก่อนแก้โค้ด) — **PASS**. ตรวจ docs/tasks.md "T125 — ผลตัดสินใจ": ผู้ใช้ยืนยันตัวเลือก A "Deep Jade" + mapCanvasBg ทางเลือก B ไว้ชัดเจนก่อน T126 เริ่ม ไม่มีการแก้โค้ด 6 ไฟล์ใดๆ ก่อนบันทึกการตัดสินใจนี้ (ตรวจลำดับ commit/เอกสารสอดคล้องกัน)
+- [x] AC2 (ค่าสีใหม่รวมศูนย์ที่ theme.ts เดียว + ผ่าน WCAG AA >=4.5:1) — **PASS สำหรับ 4 คู่สีหลักที่ตรวจ, พบ finding เพิ่มเติม 1 จุดนอกเหนือ 4 คู่ที่ระบุ** ดูรายละเอียดค่า contrast ที่คำนวณอิสระด้านล่าง และดูหัวข้อ "บั๊กที่พบ" สำหรับจุดที่ finding
+  - คำนวณอิสระ (สูตร relative luminance ของ WCAG เขียนเองใน us35TokenAndContrastAudit.test.ts ไม่แชร์โค้ดกับ dev-notes.md/ของ programmer): textPrimary on background = **15.90:1**, textSecondary on background = **5.31:1**, accentDark on accentSurface = **7.05:1**, textOnDark on tooltipBg (composite ทับ mapCanvasBg ขาว) = **11.71:1** — ตัวเลขตรงกับที่ dev-notes.md "รอบ 15" คำนวณด้วยมือไว้เป๊ะทั้ง 4 ค่า ยืนยันว่าคำนวณถูกต้องจริง ไม่ใช่แค่คัดลอกมา
+  - สแกนหาสี hardcode อิสระ (regex กว้างกว่า T131: ครอบคลุมทั้ง hex/rgba และ CSS named color เช่น white/gray/transparent) ใน 6 ไฟล์ที่แก้ไข — **ไม่พบ hex/rgba หรือ named-color ใดที่ไม่ได้อ้างอิงจาก COLORS** ตรงกับที่ T131 อ้างไว้ ยืนยันด้วย manual grep เพิ่มเติมเช่นกัน (ไม่พบ 'white'/'black'/'gray' ฯลฯ ใน 6 ไฟล์เลย)
+  - ตรวจว่าทุก COLORS.xxx ที่ถูกใช้ใน 6 ไฟล์มีตัวตนจริงบน COLORS export (ไม่มี key พิมพ์ผิด/ไม่มีอยู่จริง) — ผ่านครบ
+- [x] AC3 (คงความหมายเชิงสถานะเดิม) — **PASS**. ตรวจ hue family อิสระด้วยโค้ด: unlockedTop/accent/unlockedSide/accentDark ยังเป็นตระกูลเขียว (G channel เด่นกว่า R/B), lockedTop ยังเป็นเทากลาง (R/G/B ห่างกันไม่เกิน 20), gold ยังเป็นโทนทอง/เหลืองอุ่น (R>G>B), danger ยังเป็นตระกูลแดง (R เด่น) — ครบตาม 4 กลุ่มความหมายที่ requirements.md ระบุ
+- [x] AC4 (before/after ต่างกันจับต้องได้จริง) — **PASS**. คำนวณ channel-distance อิสระเทียบกับค่าเก่าที่ระบุใน design-spec.md ตาราง "ตัวเลือก A: Deep Jade" (ไม่ใช้ค่าจาก dev-notes.md) — ทุก token ที่เปลี่ยน (unlockedTop, unlockedSide, lockedTop, background, textPrimary, textSecondary, trackBg, gold) มีระยะห่างรวมทุกช่อง RGB มากกว่า 6 หน่วยชัดเจน (ค่าจริงส่วนใหญ่ห่างกันหลักสิบถึงหลักร้อยหน่วย) ไม่ใช่การขยับ 1-2 หน่วยความสว่างเล็กน้อยตามที่ AC ห้ามไว้
+
+### US-36: Redesign หน้า HomeScreen (แผนที่ 3 มิติ, Header Progress, Legend, แถบค้นหา)
+
+- [x] AC1 (ใช้ token ใหม่ครบทุกจุด ไม่มี hex เดิมหลงเหลือ) — **PASS**. นอกจากตรวจ source (เหมือน T131) แล้ว เดิน **render tree จริง** ของ HomeScreen ที่ mount ผ่าน Navigator จริง (homeScreenVisualIdentityAndRegression.test.tsx) ยืนยันค่าที่ resolve ออกมาจริงตรงกับ token: การ์ดแผนที่ 3 มิติ resolve เป็น backgroundColor: mapCanvasBg / borderRadius: RADIUS.xl / shadow ตรง SHADOWS.lg เป๊ะ, การ์ด HeaderProgress resolve เป็น accentSurface / RADIUS.xl / SHADOWS.md พร้อม gradient fill จริง (decode ค่าสีจาก native ExpoLinearGradient colors prop ที่เป็น ARGB integer ยืนยันตรงกับ [accent, accentDark]), Legend chip resolve เป็น COLORS.surface + SHADOWS.sm, GlobalSearchBar การ์ด resolve เป็น COLORS.surface / COLORS.border ตอน default และเปลี่ยนเป็น COLORS.accent / SHADOWS.lg ตอน focus จริง — และยืนยันเพิ่มว่า **ไม่มีค่า hex เดิมก่อนรอบ 15** (#1D9E75, #0F6E56, #D9D9D9, #E8E8E8, #1A1A1A, #6B6B6B, #E5E5E5, #E5B93C, #EAF7F1, #EDEDED) หลุดอยู่ใน render tree จริงของหน้า Home จุดใดเลย
+- [x] AC2 (visual identity เปลี่ยนสังเกตเห็นได้จริง) — **PASS โดยอนุมาน** (ไม่มีผู้ทดสอบมนุษย์เปรียบเทียบ screenshot จริงในสภาพแวดล้อมนี้ — เป็นข้อจำกัดของ Tester อัตโนมัติ ดู Coverage gap ด้านล่าง) แต่ยืนยันเชิงโครงสร้างว่าเปลี่ยนจริงและเปลี่ยนมากกว่าระดับ "แทบมองไม่เห็น": พื้นหลังหน้าเปลี่ยนจากขาวล้วนเป็นขาวอมมินท์ (#F6F9F7), การ์ดแผนที่/HeaderProgress/GlobalSearchBar ทั้งหมดมีเงา/มุมโค้ง/พื้นผิวใหม่ที่ resolve ได้จริงตามที่ตรวจข้างบน, ตัวเลขสถิติใน HeaderProgress ใหญ่ขึ้นชัดเจน (22px/800 เทียบ label รอบข้าง 15px/600 — เห็นจาก render tree จริง)
+- [x] AC3 (layout ตาม 8pt grid SPACING, ดูมีมิติขึ้น) — **PASS**. ตรวจโค้ด HomeScreen.tsx ยืนยัน pattern "marginBottom เดียวต่อ section" ด้วย SPACING.lg สม่ำเสมอทุก section (topBar -> search card -> header progress card -> map hero card -> legend) ไม่มีค่า spacing แบบ magic number หลุดมา, การ์ดแผนที่มี ambient shadow ellipse ใหม่ (ยืนยันด้วย decode ARGB payload ของ Ellipse fill จริงตรงกับ COLORS.mapAmbientShadow)
+- [x] AC4 (ไม่มี regression ต่อฟังก์ชันเดิม: จำนวนจังหวัดปลดล็อก, แตะจังหวัด, ค้นหา+นำทาง, Province Master) — **PASS**. ยืนยันด้วย test ที่ mount HomeScreen จริงผ่าน NavigationContainer/JournalProvider/CheckinProvider จริง (คนละไฟล์จาก homeScreen.test.tsx เดิมของ programmer แต่ยืนยัน contract เดียวกันจากมุมสีที่เปลี่ยน):
+  - Map3D ยังคง render ครบ **76 tiles พอดี** ทุกตัวมี accessibilityLabel รูปแบบเดิมเป๊ะ ("{nameTh}, ยังไม่ได้ไป" / "{nameTh}, ไปแล้ว" / ต่อท้าย ", ครบ Province Master" เฉพาะจังหวัดที่เป็น Master จริง)
+  - แตะจังหวัดจาก Home จริง -> นำทางเข้า ProvinceDetail ถูกจังหวัดจริง (ภูเก็ต)
+  - พิมพ์ค้นหา "เชียงใหม่" -> เห็นผลลัพธ์ -> แตะ -> นำทางเข้าเชียงใหม่ถูกต้อง (ไม่ได้รับผลกระทบจากการเปลี่ยนสไตล์การ์ด/shadow ใหม่)
+  - Legend chip "เที่ยวครบทุกที่แนะนำ" (Province Master, US-14) ยังคงแสดงอยู่ครบ เปลี่ยนแค่พื้นผิว chip
+- [x] AC5 (Animation/interaction จาก US-34 ไม่ถูกรื้อ) — **PASS**. ไม่ได้เขียน test ซ้ำเพราะ suite เดิมของ US-34 (t120EntranceAnimationWiring.test.ts, entranceAnimationRealRender.test.tsx, reduceMotionWiring.test.tsx) ยังผ่านครบ **โดยไม่มีการแก้ assertion ใดๆ เลย** เมื่อรัน npx jest เต็มชุด (ตรวจสอบ git diff ของไฟล์เหล่านี้เพิ่มเติมว่า programmer ไม่ได้แตะไฟล์เหล่านี้ในรอบนี้จริง — ไม่มีการแก้ไขปรากฏใน git status ของรอบนี้) — เป็นหลักฐานที่หนักแน่นกว่าแค่เชื่อคำอ้าง เพราะถ้า assertion เดิมพังจากการเปลี่ยนสี/layout จริง จะต้องมีคนแก้ไฟล์เหล่านี้เพื่อให้ผ่าน แต่ไม่มี
+
+---
+
+## บั๊กที่พบ (รอบนี้)
+
+### FINDING-1 (Severity: **Low-Medium**, เป็น finding เพิ่มเติมนอกเหนือ 4 คู่สีที่ AC ระบุชัดเจน ไม่ใช่ FAIL ตรงๆ ของ AC2 แต่เข้าข่ายเจตนารมณ์ "ข้อความสำคัญ" ที่ AC2 พูดถึง): ลิงก์ "สถิติ" บน TopBar ของ HomeScreen ใช้สี COLORS.accent บนพื้น COLORS.background — contrast วัดได้จริงแค่ **2.87:1** ไม่ผ่านเกณฑ์ WCAG AA (4.5:1) สำหรับข้อความขนาดปกติ
+
+- **ไฟล์:** src/screens/HomeScreen.tsx — styles.statsLink ({ fontSize: 15, color: COLORS.accent, fontWeight: '600' }) วางบน styles.container (backgroundColor: COLORS.background)
+- **หลักฐาน:** คำนวณด้วยสูตร WCAG relative-luminance เดียวกับที่ใช้ยืนยัน 4 คู่หลัก (us35TokenAndContrastAudit.test.ts, test "[finding] accent (topBar สถิติ link text) on background") -> **2.87:1**
+- **ไม่ใช่บั๊กใหม่ทั้งหมด แต่แย่ลงจากเดิม:** คำนวณย้อนกลับด้วยค่าสีชุดเก่าก่อนรอบ 15 (accent เดิม #1D9E75 บน background เดิม #FFFFFF) ได้ **3.39:1** — เดิมก็ไม่ผ่าน AA อยู่แล้ว (เป็นบั๊กเดิมที่ไม่เคยถูก flag มาก่อนในรอบก่อนหน้า) แต่หลังรอบ 15 ค่า contrast ยิ่ง **ลดลง** (จาก 3.39 -> 2.87) เพราะ accent ใหม่ (#15A87A) สว่าง/อิ่มตัวกว่าตัวเก่าเมื่อเทียบกับพื้นหลังที่ก็สว่างขึ้นเล็กน้อยเช่นกัน (#F6F9F7 เทียบ #FFFFFF เดิม)
+- **เหตุผลที่ไม่ตัดสินเป็น FAIL เต็มของ AC2:** dev-notes.md ระบุชัดว่า AC2 ตรวจ 4 คู่สีเฉพาะเจาะจง (ซึ่งผ่านทั้งหมด) และคำจำกัดความ "ปุ่ม CTA หลัก" ในตัวอย่างของ AC2 หมายถึงปุ่มไม่ใช่ลิงก์ข้อความในหัวหน้าจอโดยตรง — จึงไม่ระบุเป็น FAIL เต็มของ AC ใด แต่รายงานไว้อย่างตรงไปตรงมาเพราะ (ก) เป็นข้อความที่ผู้ใช้ต้องอ่าน/กดใช้งานจริงบนหน้าแรกสุดของแอป (ข) contrast แย่ลงจริง ไม่ใช่แค่คงเดิม (ค) รอบนี้เป็นรอบที่ตรวจ WCAG AA โดยตรงตาม AC2 พอดี จึงควรบันทึกไว้ให้ PM/UIUX ตัดสินใจว่าจะแก้พร้อมกันเลยหรือรอ US-37/US-38 (รอบทบทวนทุกหน้าจอ)
+- **ข้อเสนอแนะ (ให้ programmer/UIUX พิจารณา ไม่ใช่หน้าที่ Tester แก้เอง):** เปลี่ยน statsLink ให้ใช้ COLORS.accentDark (ผ่าน AA แน่นอนกว่าเพราะเข้มกว่า) แทน COLORS.accent หรือเพิ่ม fontWeight เป็น 700 พร้อมขนาดใหญ่ขึ้นเพื่อเข้าเกณฑ์ large-text (3:1) แทน — แต่ต้องคำนวณ contrast ของตัวเลือกที่เลือกซ้ำก่อน sign-off
+
+**ไม่พบบั๊ก High severity ใดในรอบนี้** — ไม่มี regression ต่อฟังก์ชันเดิม, ไม่มี hex/rgba หลงเหลือจริง, ไม่มี animation ของ US-34 พัง
+
+---
+
+## ตรวจสอบจุดที่ programmer ระบุว่า deviate จาก spec เล็กน้อย (ตาม dev-notes.md "รอบ 15" หัวข้อ "จุดที่ทำไม่ได้ตาม spec 100%")
+
+1. **ข้าม glossy top-edge highlight ของ ProvinceTile3D** — ตรวจ docs/design-spec.md "Map3D + ProvinceTile3D" ยืนยันคำว่า **"(optional, ไม่บังคับ)"** ต่อท้ายข้อนี้ตรงตัว -> **ยอมรับได้จริง ไม่ใช่ deviation ที่ต้องส่งกลับ** ตรวจโค้ด ProvinceTile3D.tsx เพิ่มเติมพบว่ายังมี stroke ขอบบนบางๆ อยู่ (COLORS.textOnDark width 0.4/1.6) ซึ่งเป็น carry-over จากโค้ดเดิมอยู่แล้ว ไม่ใช่ของใหม่ที่ตั้งใจทำ "glossy" เพิ่มแต่อย่างใด — สอดคล้องกับที่ dev-notes.md อธิบายไว้
+2. **hero stat ("ปลดล็อกแล้ว X/76 จังหวัด") อยู่บรรทัดเดียวกันแทนขึ้นบรรทัดใหม่** — ตรวจ docs/design-spec.md "HeaderProgress" พบว่าข้อความจริงคือ "ตัวเลข X/76 ใช้ font ใหญ่ขึ้นเป็นจุดเด่น ส่วนคำอธิบาย 'จังหวัด' เป็นบรรทัดรองเล็กกว่า (สร้าง hierarchy ใหม่แทนประโยคบรรทัดเดียวเท่ากันหมด)" — คำว่า "บรรทัดรอง" ในภาษาไทยปกติสื่อถึง "บรรทัดถัดไป" ไม่ใช่แค่ "ส่วนย่อยที่เล็กกว่าในบรรทัดเดียวกัน" ตามตัวอักษรเข้มงวด การตีความของ programmer (ทำ hierarchy ด้วยขนาดตัวอักษรต่างกันในบรรทัดเดียว) **ยังคงบรรลุเจตนารมณ์ของ AC** (ตัวเลขเด่นกว่าข้อความรอบข้างชัดเจน — ยืนยันจริงจาก render tree: 22px/800 เทียบ 15px/600) แต่ **ไม่ตรงกับคำอธิบายภาพประกอบ 100% ตามตัวอักษร** — จัดเป็น deviation ระดับที่ยอมรับได้จริงเพราะ (ก) เหตุผลทางเทคนิคสมเหตุสมผล (รักษา getByText(...) exact-string ของ regression test เดิมจาก US-1) (ข) ไม่กระทบสาระของ AC ที่แท้จริง (ตัวเลขต้องเด่น) แต่ไม่ใช่ optional ตรงตัวเหมือนข้อ 1 — แนะนำให้ PM/UIUX ยืนยันด้วยสายตาอีกครั้งว่ายอมรับได้ (ตรงกับ AC ของ US-38 ที่ต้องมีคนดูด้วยตาจริงก่อนปิดงาน ไม่ใช่ QA อัตโนมัติอย่างเดียว)
+3. **mapCanvasBg ใช้ #FFFFFF (เท่ากับ surface) แทนที่จะคำนวณ tint ใหม่** — ตรวจ docs/tasks.md "T125 — ผลตัดสินใจ" พบข้อความต้นฉบับระบุ **"ทางเลือก B (tint อ่อนของพื้นหลังหลัก ไม่ใช่พื้นเข้ม)"** — คำว่า "tint อ่อนของพื้นหลังหลัก" ตามตัวอักษรน่าจะหมายถึงสีที่ผสม/ใกล้เคียงกับ background (#F6F9F7) ในสัดส่วนหนึ่ง ไม่ใช่ขาวบริสุทธิ์ที่เท่ากับ surface เป๊ะ — dev-notes.md เองก็ยอมรับตรงๆ ว่า "ใช้ทางเลือกที่ orchestrator อนุญาตไว้...แทนที่จะคำนวณ tint ใหม่" ซึ่งเป็นการตีความขยายขอบเขตคำว่า "tint อ่อน" ให้ครอบคลุมถึง "ขาวล้วนตัดกับพื้นหลังอมมินท์อ่อน" ด้วย ไม่ใช่สิ่งที่ตัดสินใจไว้ชัดเจนในเอกสารเดิม — **เป็น observation ที่ควรแจ้ง PM ให้ยืนยันอีกครั้ง ไม่ใช่ FAIL ของ AC ใดโดยตรง** (ไม่มี AC ข้อไหนห้ามใช้ขาวล้วนเจาะจง และผลลัพธ์ที่ตรวจสอบได้จริงคือการ์ดแผนที่ resolve เป็นสีขาวต่างจากพื้นหลังมินท์อ่อนจริงตามที่ตรวจใน AC1/AC3 ข้างบน) — severity: ต่ำมาก เป็นเรื่อง compliance กับถ้อยคำของ decision-gate มากกว่าเรื่องผลลัพธ์ภาพจริง
+
+---
+
+## Coverage ที่ยังขาด (รอบนี้ — ตรวจไม่ได้ในสภาพแวดล้อมนี้)
+
+1. **US-36 AC2/US-38 AC3 (ผู้ทดสอบมนุษย์เทียบ screenshot ก่อน/หลังจริง)** — สภาพแวดล้อมนี้ไม่มีอุปกรณ์/เครื่องมือ capture screenshot จริงหรือมนุษย์เปรียบเทียบสายตา ยืนยันได้แค่เชิงโครงสร้าง (token/สไตล์ที่ resolve จริงต่างจากเดิมชัดเจนตามที่ตรวจข้างบน) — ยังต้องมีคนดูแอปจริงอย่างน้อย 1 รอบตามที่ US-38 AC3 กำหนดไว้ชัดเจนอยู่แล้วก่อนปิดงานทั้ง Epic นี้ (ไม่ใช่แค่รอบ US-35/US-36 นี้)
+2. **ความลื่นไหลจริงของ ambient shadow ellipse ใหม่ + gradient fill บนอุปกรณ์จริง** — เหมือนข้อจำกัดเดิมของ US-3/US-34 ทุกรอบก่อนหน้า (jest reanimated mock ไม่ simulate ภาพเคลื่อนไหว/เรนเดอร์จริงบนหน้าจอ) ยืนยันได้แค่ค่าที่ resolve ถูกต้องตาม token ไม่ใช่ "หน้าตาจริงบนอุปกรณ์"
+3. **contrast ของ dropdown ผลค้นหาเทียบพื้นหลังหน้าโดยรวมกรณี mapCanvasBg/background ถูกเปลี่ยนเป็นโทนเข้มในอนาคต (เฟส 2/ตัวเลือกอื่น)** — ไม่เกี่ยวกับรอบนี้ (เลือกตัวเลือก A "Deep Jade" ที่เป็นโทนอ่อนล้วนแล้ว) แต่บันทึกไว้ตามที่ design-spec.md เตือนไว้เผื่ออนาคต
+
+## ไฟล์ที่ Tester เพิ่มเข้ามาในรอบนี้ (ไม่ได้แก้โค้ดหลักใดๆ ใน src/screens, src/components, src/storage, src/utils, src/data, src/theme.ts, docs/design-spec.md, docs/tasks.md, docs/dev-notes.md เลย)
+
+- src/__tests__/qa-round15/us35TokenAndContrastAudit.test.ts (ใหม่, 35 tests)
+- src/__tests__/qa-round15/homeScreenVisualIdentityAndRegression.test.tsx (ใหม่, 9 tests)
+
+---
+
+# รอบ Verify ที่ 2: บั๊ก contrast ลิงก์ "สถิติ" (ตามหลัง qa-result.md รอบ 16, ตรวจสอบอิสระโดย Tester)
+
+## สรุปรอบนี้
+
+**บั๊กเดิม (qa-result.md รอบ 16):** `styles.statsLink.color = COLORS.accent (#15A87A)` บน `COLORS.background (#F6F9F7)` วัดได้ ~2.87:1 ไม่ผ่าน WCAG AA (4.5:1)
+
+**สิ่งที่ programmer แก้ (dev-notes.md รอบ 16):** เปลี่ยน `HomeScreen.tsx` `styles.statsLink.color` จาก `COLORS.accent` เป็น `COLORS.accentDark` — ไม่แตะ token `COLORS.accent` เอง (ยังใช้ที่อื่น เช่น gradient/ไอคอน)
+
+**ตรวจสอบอิสระ (คำนวณเองด้วยสูตร WCAG relative-luminance ผ่าน node script แยกจากทั้ง dev-notes.md และ test เดิม):**
+- `contrastRatio(accentDark #0B5C46, background #F6F9F7) = 7.5230:1` — **ผ่าน AA (4.5:1) และผ่านระดับ AAA (7:1) ด้วย** ตัวเลขใกล้เคียงกับที่ programmer อ้าง (7.51:1) ส่วนต่างเล็กน้อยมาจาก rounding เท่านั้น ไม่กระทบผลตัดสิน — **PASS**
+- ตรวจ token เก่า `accent (#15A87A)` บน `background` ยังคงอยู่ที่ ~2.87:1 (ยังไม่ผ่าน) แต่ **ไม่ใช่จุดที่ถูกเรียกใช้แล้วในหน้าจอนี้อีกต่อไป** — ยืนยันด้วยขั้นตอนถัดไป
+
+**เดิน render tree จริงของ `HomeScreen.tsx` (ไม่เชื่อ source code เฉยๆ):** mount `HomeScreen` เต็มรูปแบบผ่าน `NavigationContainer` + `JournalProvider` + `CheckinProvider` จริง (mock เฉพาะ `storage/db` และ `wikipediaService`) แล้วดึง `Text` node ที่มีข้อความ "สถิติ" จริงจาก `toJSON()`/`screen.getByText` — อ่านค่า `style.color` ที่ resolve จริง พบว่าเท่ากับ `COLORS.accentDark` (`#0B5C46`) และ **ไม่เท่ากับ** `COLORS.accent` — ยืนยันว่าการแก้ไขไปถึงหน้าจอจริง ไม่ใช่แค่ source-level
+
+**การตัดสินใจเรื่องไฟล์ test เดิม `us35TokenAndContrastAudit.test.ts`:** เห็นด้วยกับคำอธิบายของ programmer ว่าเคส `[finding] accent (topBar "สถิติ" link text) on background` เดิมเช็ก `contrastRatio(COLORS.accent, COLORS.background)` ตรงจาก token โดยไม่เคยเรนเดอร์ component จริง — เป็น test ที่ "ตรวจผิดจุด" หลังบั๊กถูกแก้ที่จุดใช้งานแล้ว (ไม่ใช่ที่ token) เคสเดิมจะ fail ตลอดไปไม่ว่าจะแก้ถูกหรือไม่ก็ตาม ไม่มีประโยชน์ในการเป็น regression guard อีกต่อไป → **แก้ไขเอง** โดย:
+  1. เปลี่ยนนามสกุลไฟล์จาก `.test.ts` → `.test.tsx` (ต้องใช้ JSX เพื่อ mount component จริง)
+  2. แทนที่เคส `[finding]` เดิม (เช็ก raw token `COLORS.accent`) ด้วย describe block ใหม่ `[US-35/US-36 round-16 fix, verified round 2] topBar "สถิติ" link text contrast` ที่มี 2 เคส:
+     - เช็ก `contrastRatio(COLORS.accentDark, COLORS.background) >= 4.5` (คู่ token ที่ถูกใช้งานจริงตอนนี้)
+     - เรนเดอร์ `HomeScreen` จริงผ่าน `TestApp` wrapper (รูปแบบเดียวกับ `homeScreenVisualIdentityAndRegression.test.tsx`) แล้วยืนยันว่า node "สถิติ" จริง resolve `style.color === COLORS.accentDark` และ `!== COLORS.accent`
+  3. คงทุกเคสอื่นในไฟล์ไว้เหมือนเดิมทั้งหมด (ไม่ได้ลด coverage เดิม)
+
+**ผลรัน `npx jest` เต็มชุดหลังปรับ:** **83 test suites ผ่านทั้งหมด, 480 passed + 1 skip (documented environment limitation เดิม), 0 failed** — ไม่มี regression ใหม่จากการแก้ไฟล์ test นี้
+
+## รายละเอียดตาม Acceptance Criteria (รอบนี้)
+
+- [x] บั๊ก contrast ลิงก์ "สถิติ" ที่ QA ตีกลับในรอบ 16 ได้รับการแก้ไขแล้วจริง ยืนยันทั้งค่าตัวเลข (7.52:1 ผ่าน AA) และ render tree จริง — **PASS**
+- [x] ไม่มี regression อื่นเกิดขึ้นจากการแก้ (full suite เดิมยังผ่านครบ) — **PASS**
+
+## บั๊กที่พบ (รอบนี้)
+
+ไม่พบบั๊กใหม่ — การแก้ไขของ programmer ตรงตามที่รายงาน ไม่มี severity สูงหรือ regression ค้าง
+
+## ไฟล์ที่ Tester แก้ไขในรอบนี้ (เฉพาะไฟล์ test ของตัวเอง ไม่แตะโค้ดหลัก)
+
+- `src/__tests__/qa-round15/us35TokenAndContrastAudit.test.ts` → เปลี่ยนชื่อเป็น `src/__tests__/qa-round15/us35TokenAndContrastAudit.test.tsx` และแก้เฉพาะ describe block ของเคส "สถิติ" contrast ตามรายละเอียดข้างต้น (เคสอื่นในไฟล์เดิมไม่ถูกแตะ)
+
+---
+
+# รอบ 18: Phase 2 US-37 (Color Palette & Layout Redesign เฟส 2 — 6 หน้าจอที่เหลือ)
+
+## หมายเหตุกระบวนการ
+Sub-agent `tester`/`qa` (มีแค่เครื่องมือ Write ไม่มี Edit) ล้มซ้ำ 3 ครั้งด้วย API error "output เกิน 64000 token" ตอนพยายามเขียนทับไฟล์เอกสารที่มีอยู่แล้ว (`docs/tasks.md`) แม้ปรับ prompt ให้กระชับแล้วก็ตาม — เป็นปัญหาเชิงระบบไม่ใช่ scope ของงาน orchestrator (ผม) จึงทำหน้าที่ตรวจสอบอิสระของ Tester+QA เองในรอบนี้แทน โดยยึดหลักเดียวกัน (ตรวจสอบเอง ไม่เชื่อรายงานของ programmer เฉยๆ)
+
+## สรุป
+Total: 84 suites (487 passed + 1 skip) | Pass: 84 | Fail: 0 — เพิ่มจาก baseline เดิม 83 suites/480 passed พอดี 1 suite ใหม่ (`noHardcodedHexPhase2.test.ts`, T140, 7 เคส) ที่เขียนเพิ่มในรอบนี้
+
+## การตรวจสอบอิสระ (ไม่พึ่ง dev-notes.md อย่างเดียว)
+1. **`npx tsc --noEmit -p .`** — รันเองอิสระ ผ่านสะอาด ไม่มี type error ตรงกับที่ programmer อ้าง
+2. **Grep หา hex/rgba literal เองในทั้ง 6 ไฟล์ที่แก้ (T133-T138)** (`ProvinceDetailScreen.tsx`, `AddEntryScreen.tsx`, `StatsScreen.tsx`, `SettingsScreen.tsx`, `LandmarkCard.tsx`, `NewsCard.tsx`) ด้วย pattern `#[0-9A-Fa-f]{3,8}` — **ไม่พบ hex literal เหลือแม้แต่จุดเดียว** ยืนยันคำอ้างของ programmer ตรงกัน (LandmarkCard.tsx ยังมี `rgba(0,0,0,...)` 3 จุดตามที่ dev-notes.md ระบุไว้ล่วงหน้าว่าเป็นข้อยกเว้นตั้งใจ — generic photo-dimming overlay ไม่ใช่ brand color มี token ไม่ตรงความหมาย)
+3. **Grep `NewsErrorState.tsx` (ไฟล์ที่ dev-notes.md แจ้งว่าไม่ได้แตะ)** — ยืนยันพบ `#FFFFFF` หลงเหลือจริง 2 จุด (บรรทัด 32, 58) ตรงกับที่ programmer รายงานไว้ล่วงหน้า ไม่ใช่การซ่อนปัญหา
+4. **เขียน test ใหม่ T140** (`src/__tests__/theme/noHardcodedHexPhase2.test.ts`) ตาม pattern เดียวกับ `noHardcodedHexRound15.test.ts` เดิม (regex guard สแกน source ตรงๆ) ครอบคลุม 7 ไฟล์ (6 ไฟล์ที่แก้ + `NewsScreen.tsx` ที่ grep แล้วสะอาดอยู่แล้ว) พร้อม allowlist เฉพาะจุดของ `LandmarkCard.tsx` (3 rgba(0,0,0,x) ที่ตั้งใจเก็บไว้ + docstring ของ helper `withAlpha`) — รันผ่านครบ 7/7 เคส
+5. **`npx jest` เต็มชุด (รวม test ใหม่จากข้อ 4)** — รันเอง 2 ครั้ง ได้ผลตรงกัน **84/84 suites, 487 passed + 1 skip, 0 failed** ไม่มี suite เดิมพัง ไม่มี flaky ปรากฏในการรันครั้งนี้ (ต่างจากที่ programmer เจอ `syncLifecycle.test.tsx` flaky ตอนรันครั้งแรกของตัวเอง — รันซ้ำของผมเองผ่านตั้งแต่ครั้งแรกทั้ง 2 รอบ ยืนยันว่าเป็น intermittent จริงไม่ใช่ regression ของรอบนี้)
+
+## รายละเอียดตาม Acceptance Criteria
+
+### US-37
+- [x] AC1/AC2 (ทิศทาง A — ปรับปรุงจากฐานเดิม): ทุกหน้าที่ผ่าน redesign v2-v4 มาแล้ว (`LandmarkCard`, `StatsScreen`, `SettingsScreen`, `NewsScreen`) ถูกตรวจสอบและสลับ token ครบ ไม่มี hex เดิมหลงเหลือ — **PASS** (ยืนยันด้วยข้อ 2/4 ข้างต้น)
+- [x] AC3 (`ProvinceDetailScreen`/`AddEntryScreen` ต้องได้ layout ใหม่ระดับ spacing/hierarchy): มี design spec จาก UIUX (T132, `docs/design-spec.md`) และ implement ตรงตาม spec จริง (section gap `SPACING.lg`, การ์ด+เส้นขอบ `COLORS.borderLight`) — **PASS**
+- [x] AC4 (functional behavior เดิมไม่เปลี่ยน): ยืนยันด้วย full regression suite เดิมทั้งหมดผ่าน 100% (US-4, US-6, US-8, US-9, US-22, US-23, US-29 ถึง US-32 ไม่มี suite ใดพัง) — **PASS**
+
+### US-38
+- [ ] AC1 (checklist + screenshot ก่อน/หลังครบทุกหน้าจอหลัก ให้ PM/ผู้ใช้ยืนยัน): **ยังไม่ทำ** — ไม่มี runtime/อุปกรณ์จริงในสภาพแวดล้อมนี้ให้ capture screenshot ได้ เป็น coverage gap เดียวกับ T30/US-31 AC2 เดิมของโปรเจกต์ (ข้อจำกัดเครื่องมือ ไม่ใช่โค้ดผิด)
+- [x] AC2 (ไม่มี hex hardcode ใหม่เพิ่มขึ้น): **PASS** ในขอบเขต 6 ไฟล์ที่แก้ (ยืนยันด้วย test ใหม่ T140) — ยกเว้น `NewsErrorState.tsx` ที่มี hex เดิมอยู่ก่อนแล้ว (ไม่ใช่ของใหม่ที่เพิ่มขึ้นในรอบนี้ และไม่อยู่ใน scope ไฟล์ที่ระบุใน T138) นับเป็น pre-existing gap ไม่ใช่ regression
+- [x] AC3 (automated test เดิมต้อง pass ครบ regression-free): **PASS** เต็ม (84/84, 0 failed)
+- [ ] AC4 (ผู้ใช้ยืนยันความรู้สึกผ่านการเปิดแอปจริง): **ยังไม่เกิดขึ้น** — ต้องรอผู้ใช้เปิดแอปจริงเอง (T144) ไม่ใช่สิ่งที่ automated QA ตัดสินแทนได้ (คำตัดสิน PM ประเด็น 28)
+
+## บั๊กที่พบ (รอบนี้)
+ไม่พบบั๊กเชิงพฤติกรรมใหม่ — มีเพียง coverage gap 2 ข้อของ US-38 (AC1 screenshot, AC4 user confirmation) ที่เป็น manual step ที่ไม่มีใครแทนผู้ใช้ได้ ไม่ใช่ "บั๊ก" ในความหมาย FAIL
+
+## Coverage ที่ยังขาด
+- Screenshot ก่อน/หลังจริงของทั้ง 6 หน้าจอ (US-38 AC1) — รอทำตอนมี build ที่รันบนอุปกรณ์/emulator จริงได้
+- `NewsErrorState.tsx` ยัง hardcode `#FFFFFF` 2 จุด (ไม่กระทบ P0 ใดๆ — เป็นเพียง cleanup เพิ่มเติมถ้าต้องการ zero-hex 100% ทั้งแอป)
+- User live confirmation (US-38 AC4) — ยังไม่เกิดขึ้น

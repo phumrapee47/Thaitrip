@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import type { StyleProp, ViewStyle } from 'react-native';
 import { Image, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import type { Landmark } from '../data/thailand-landmarks';
@@ -11,6 +12,16 @@ export interface LandmarkCardProps {
   onToggle: () => void;
   /** Bento layout variant per advanced-mobile-uiux SKILL.md 2.1 — 'hero' for the top-ranked landmark, 'compact' for the 2-col grid. */
   variant?: 'hero' | 'compact';
+  /** Set true while resolveRealPhotoForLandmark is in flight — shows Shimmer. */
+  imageLoading?: boolean;
+  /**
+   * T120 / US-34: optional style override, applied AFTER the variant's own
+   * width so a caller (e.g. `LandmarkList`'s `EntranceFadeItem` wrapper, which
+   * owns the 48.5% grid-column width itself) can make this card fill 100% of
+   * its wrapper instead of re-applying a nested percentage. Undefined by
+   * default — every other caller is unaffected.
+   */
+  style?: StyleProp<ViewStyle>;
 }
 
 /** Hex (#RRGGBB) -> `rgba(...)` string, for the semi-transparent pill badge. */
@@ -21,31 +32,42 @@ function withAlpha(hex: string, alpha: number): string {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
-export default function LandmarkCard({ landmark, visited, onToggle, variant = 'compact' }: LandmarkCardProps) {
+export default function LandmarkCard({ landmark, visited, onToggle, variant = 'compact', imageLoading = false, style }: LandmarkCardProps) {
   const [imgError, setImgError] = useState(false);
   const categoryColor = (landmark.category && CATEGORY_COLORS[landmark.category]) || CATEGORY_COLOR_FALLBACK;
   const isHero = variant === 'hero';
+  const imageUri = landmark.imageUrl && !imgError ? landmark.imageUrl : FALLBACK_LANDMARK_IMAGE;
 
   return (
-    <View
+    <PressableScale
+      variant="emphasized"
+      haptic="none"
+      onPress={onToggle}
       style={[
         styles.card,
         isHero ? styles.cardHero : styles.cardCompact,
         visited && styles.cardVisited,
+        style,
       ]}
     >
-      {/* Image Container — 16:9 cover photo. Falls back to a real Wikimedia
-          landscape photo (not a bare icon box) when the article has no
-          thumbnail, or its imageUrl 404s/decodes-fails, so a card never reads
-          as broken/empty (advanced-mobile-uiux upgrade). */}
       <View style={[styles.imageContainer, isHero && styles.imageContainerHero]}>
-        <Image
-          testID="landmark-card-image"
-          source={{ uri: landmark.imageUrl && !imgError ? landmark.imageUrl : FALLBACK_LANDMARK_IMAGE }}
-          style={styles.image}
-          onError={() => setImgError(true)}
-          resizeMode="cover"
-        />
+        {imageLoading && !landmark.imageUrl ? (
+          <LinearGradient
+            testID="landmark-card-image-loading"
+            colors={[COLORS.trackBg, COLORS.borderLight, COLORS.trackBg]}
+            start={{ x: 0, y: 0.5 }}
+            end={{ x: 1, y: 0.5 }}
+            style={styles.image}
+          />
+        ) : (
+          <Image
+            testID="landmark-card-image"
+            source={{ uri: imageUri }}
+            style={styles.image}
+            onError={() => setImgError(true)}
+            resizeMode="cover"
+          />
+        )}
         {/* Thin gradient wash on every card (not just hero) so the pill badge
             always has contrast against any photo — heavier on hero to also
             carry the on-image title. */}
@@ -82,6 +104,7 @@ export default function LandmarkCard({ landmark, visited, onToggle, variant = 'c
 
         {/* Action Button */}
         <PressableScale
+          variant="emphasized"
           style={[styles.checkinButton, visited ? styles.checkinButtonActive : styles.checkinButtonInactive]}
           onPress={onToggle}
           hitSlop={8}
@@ -95,17 +118,17 @@ export default function LandmarkCard({ landmark, visited, onToggle, variant = 'c
           </Text>
         </PressableScale>
       </View>
-    </View>
+    </PressableScale>
   );
 }
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: COLORS.surface,
     borderRadius: RADIUS.lg,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: '#EFEFEF',
+    borderColor: COLORS.borderLight,
     ...SHADOWS.sm,
   },
   cardHero: {
@@ -117,13 +140,13 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.sm,
   },
   cardVisited: {
-    borderColor: '#1D9E7540',
-    backgroundColor: '#FAFDFB',
+    borderColor: withAlpha(COLORS.accent, 0.25),
+    backgroundColor: COLORS.accentSurface,
   },
   imageContainer: {
     width: '100%',
     aspectRatio: 16 / 9,
-    backgroundColor: '#EBEBEB',
+    backgroundColor: COLORS.trackBg,
     position: 'relative',
   },
   imageContainerHero: {
@@ -142,7 +165,7 @@ const styles = StyleSheet.create({
     borderRadius: RADIUS.full,
   },
   categoryText: {
-    color: '#FFFFFF',
+    color: COLORS.textOnDark,
     fontSize: 11,
     fontWeight: '600',
   },
@@ -175,7 +198,7 @@ const styles = StyleSheet.create({
   heroTitle: {
     fontSize: 20,
     fontWeight: '800',
-    color: '#FFFFFF',
+    color: COLORS.textOnDark,
     textShadowColor: 'rgba(0,0,0,0.5)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 4,
@@ -194,12 +217,12 @@ const styles = StyleSheet.create({
     minHeight: 44,
   },
   checkinButtonInactive: {
-    backgroundColor: '#F3F5F7',
+    backgroundColor: COLORS.borderLight,
     borderWidth: 1,
-    borderColor: '#E2E6EA',
+    borderColor: COLORS.border,
   },
   checkinButtonActive: {
-    backgroundColor: '#E6F6F0',
+    backgroundColor: COLORS.accentSurface,
     borderWidth: 1,
     borderColor: COLORS.accent,
   },

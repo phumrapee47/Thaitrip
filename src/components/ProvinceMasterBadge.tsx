@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { Animated, StyleSheet, Text, View } from 'react-native';
+import * as Haptics from 'expo-haptics';
 import { COLORS } from '../theme';
 
 /** T46 / US-9: badge shown only when a province's landmarks are all checked in.
@@ -11,6 +12,8 @@ export default function ProvinceMasterBadge({ visible }: { visible: boolean }) {
     if (visible) {
       scale.setValue(0);
       Animated.spring(scale, { toValue: 1, useNativeDriver: true, friction: 5 }).start();
+      // SKILL.md 3.2: notify (not impact) haptic on unlocking Province Master.
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     }
   }, [visible, scale]);
 

@@ -8,6 +8,8 @@ import { getAllEntriesSorted, getTopRegion, getUnlockedCount, TOTAL_PROVINCES } 
 import EntryListItem from '../components/EntryListItem';
 import EmptyState from '../components/EmptyState';
 import ShimmerBlock from '../components/ShimmerBlock';
+import EntranceFadeItem from '../components/EntranceFadeItem';
+import { useEntrancePlayedOnce } from '../hooks/useEntrancePlayedOnce';
 import { COLORS, RADIUS, SHADOWS, SPACING } from '../theme';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Stats'>;
@@ -21,6 +23,10 @@ export default function StatsScreen({ navigation }: Props) {
   const timeline = getAllEntriesSorted(entries);
 
   const provinceNameById = new Map(PROVINCES.map((p) => [p.id, p.nameTh]));
+
+  // T120 / US-34 AC2 (docs/design-spec.md §2.3): plays once, the first time
+  // the timeline has any entries to show.
+  const shouldPlayEntrance = useEntrancePlayedOnce(!loading && timeline.length > 0);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -76,13 +82,23 @@ export default function StatsScreen({ navigation }: Props) {
               <Text style={styles.timelineHeading}>ไทม์ไลน์ทั้งหมด</Text>
             </View>
           }
-          renderItem={({ item }) => (
-            <EntryListItem
-              entry={item}
-              provinceNameTh={provinceNameById.get(item.provinceId)}
-              onPress={() => navigation.navigate('ProvinceDetail', { provinceId: item.provinceId })}
-            />
-          )}
+          renderItem={({ item, index }) =>
+            shouldPlayEntrance ? (
+              <EntranceFadeItem index={index}>
+                <EntryListItem
+                  entry={item}
+                  provinceNameTh={provinceNameById.get(item.provinceId)}
+                  onPress={() => navigation.navigate('ProvinceDetail', { provinceId: item.provinceId })}
+                />
+              </EntranceFadeItem>
+            ) : (
+              <EntryListItem
+                entry={item}
+                provinceNameTh={provinceNameById.get(item.provinceId)}
+                onPress={() => navigation.navigate('ProvinceDetail', { provinceId: item.provinceId })}
+              />
+            )
+          }
           contentContainerStyle={styles.listContent}
         />
       )}
@@ -113,7 +129,7 @@ const styles = StyleSheet.create({
   },
   statTile: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: COLORS.surface,
     borderRadius: RADIUS.lg,
     padding: SPACING.sm,
     alignItems: 'center',

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
-import { COLORS } from '../theme';
+import { StyleSheet, Text, TextInput, View } from 'react-native';
+import PressableScale from './PressableScale';
+import { COLORS, RADIUS, SPACING } from '../theme';
 
 // PM decision (tasks.md ประเด็น 3): fixed set of 8 starter tags, multi-select,
 // plus free-text custom tags the user can add themselves.
@@ -42,13 +43,14 @@ export default function TagSelector({ selectedTags, onChange }: TagSelectorProps
         {allChips.map((tag) => {
           const selected = selectedTags.includes(tag);
           return (
-            <Pressable
+            <PressableScale
               key={tag}
+              haptic="light"
               style={[styles.chip, selected && styles.chipSelected]}
               onPress={() => toggleTag(tag)}
             >
               <Text style={[styles.chipText, selected && styles.chipTextSelected]}>{tag}</Text>
-            </Pressable>
+            </PressableScale>
           );
         })}
       </View>
@@ -61,40 +63,42 @@ export default function TagSelector({ selectedTags, onChange }: TagSelectorProps
           onSubmitEditing={addCustomTag}
           returnKeyType="done"
         />
-        <Pressable style={styles.addCustomButton} onPress={addCustomTag}>
+        <PressableScale haptic="light" style={styles.addCustomButton} onPress={addCustomTag}>
           <Text style={styles.addCustomButtonText}>เพิ่ม</Text>
-        </Pressable>
+        </PressableScale>
       </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.xs },
   chip: {
     borderWidth: 1,
     borderColor: '#D9D9D9',
-    borderRadius: 16,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    borderRadius: RADIUS.full,
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: SPACING.xxs + 2,
+    minHeight: 32,
+    justifyContent: 'center',
   },
   chipSelected: { backgroundColor: COLORS.accent, borderColor: COLORS.accent },
   chipText: { fontSize: 13, color: COLORS.textPrimary },
   chipTextSelected: { color: '#FFFFFF', fontWeight: '600' },
-  customRow: { flexDirection: 'row', gap: 8, marginTop: 10, alignItems: 'center' },
+  customRow: { flexDirection: 'row', gap: SPACING.xs, marginTop: SPACING.sm, alignItems: 'center' },
   customInput: {
     flex: 1,
     borderWidth: 1,
     borderColor: '#D9D9D9',
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+    borderRadius: RADIUS.md,
+    paddingHorizontal: SPACING.xs + 2,
+    paddingVertical: SPACING.xs,
     fontSize: 13,
   },
   addCustomButton: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 8,
+    paddingHorizontal: SPACING.sm + 2,
+    paddingVertical: SPACING.xs,
+    borderRadius: RADIUS.md,
     backgroundColor: '#EAF7F1',
   },
   addCustomButtonText: { color: COLORS.accentDark, fontWeight: '600', fontSize: 13 },

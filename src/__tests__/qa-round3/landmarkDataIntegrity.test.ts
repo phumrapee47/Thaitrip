@@ -4,6 +4,12 @@
 // output data file the way a consumer (the app) actually reads it, plus the
 // backward-compatibility guarantee US-17 AC5 promises for the 8 pilot
 // provinces from T35.
+//
+// Updated for US-27 (TAT open-data extraction, docs/requirements.md): 29 more
+// provinces were merged in from the official TAT attraction catalog, raising
+// coverage from 45/76 to 74/76. Exactly TWO provinces are still deliberately
+// kept at zero landmarks forever — not a residual gap, a fixture other tests
+// rely on (see EMPTY_FIXTURE_PROVINCE_IDS below for exactly which ones and why).
 import { LANDMARKS, getLandmarksForProvince } from '../../data/thailand-landmarks';
 import { PROVINCES } from '../../data/thailand-provinces';
 
@@ -17,6 +23,22 @@ const PILOT_PROVINCE_IDS = [
   'krabi',
   'phuket',
 ];
+
+// US-27: the TAT extraction script (scripts/extract-tat-landmarks.ts)
+// deliberately skips these two forever, because other tests already depend
+// on them staying at zero landmarks to exercise the "not curated yet" empty
+// state (US-8) through the real screen: chaiyaphum in
+// src/__tests__/integration/landmarkCheckin.test.tsx and
+// src/__tests__/qa-round3/landmarkMapIntegration.test.tsx; si-sa-ket in
+// src/components/LandmarkList.test.tsx and
+// src/__tests__/qa-round4/landmarkCardsWikipediaIntegration.test.tsx (AC6).
+const EMPTY_FIXTURE_PROVINCE_IDS = ['chaiyaphum', 'si-sa-ket'];
+
+// US-27: TAT-sourced landmarks (scripts/lib/tat-extract-core.ts
+// MAX_LANDMARKS_PER_PROVINCE) cap at 15/province — higher than the original
+// Overpass cap of 5 because TAT records are curated tourism-board entries,
+// not raw OSM POI tags, so a bigger "top picks" list is still good quality.
+const MAX_LANDMARKS_PER_PROVINCE = 15;
 
 describe('thailand-landmarks.ts data integrity after T60/T61 Overpass merge (US-16/US-17)', () => {
   it('has no duplicate landmark ids anywhere in the dataset, across provinces', () => {
@@ -55,26 +77,34 @@ describe('thailand-landmarks.ts data integrity after T60/T61 Overpass merge (US-
     expect(malformed).toEqual([]);
   });
 
-  it('exactly 45 of the 76 provinces have landmark data after T61 (8 pilot + 37 from the real Overpass run)', () => {
+  it('exactly 74 of the 76 provinces have landmark data after US-27 (45 from T61 + 29 from the TAT open-data merge)', () => {
     const provinceIdsWithData = new Set(LANDMARKS.map((l) => l.provinceId));
-    expect(provinceIdsWithData.size).toBe(45);
+    expect(provinceIdsWithData.size).toBe(76 - EMPTY_FIXTURE_PROVINCE_IDS.length);
   });
 
-  it('the remaining provinces (76 - 45 = 31) have zero landmarks and are NOT errors — they must fall through to the US-8 empty state', () => {
+  it('only the two deliberate empty-state fixture provinces have zero landmarks, and the lookup used by ProvinceDetailScreen/AddEntryScreen returns [] cleanly for them (not throw/undefined)', () => {
     const provinceIdsWithData = new Set(LANDMARKS.map((l) => l.provinceId));
-    const withoutData = PROVINCES.filter((p) => !provinceIdsWithData.has(p.id));
-    expect(withoutData.length).toBe(31);
-    // Calling the same lookup function ProvinceDetailScreen/AddEntryScreen use
-    // for one of them must return [] cleanly, not throw/undefined.
-    const sample = withoutData[0];
-    expect(getLandmarksForProvince(sample.id)).toEqual([]);
+    const withoutData = PROVINCES.filter((p) => !provinceIdsWithData.has(p.id)).map((p) => p.id);
+    expect(withoutData.sort()).toEqual([...EMPTY_FIXTURE_PROVINCE_IDS].sort());
+    for (const provinceId of EMPTY_FIXTURE_PROVINCE_IDS) {
+      expect(getLandmarksForProvince(provinceId)).toEqual([]);
+    }
   });
 
-  it('no province ever has more than 5 landmarks (US-16 AC2 cap)', () => {
+  it(`no province ever has more than ${MAX_LANDMARKS_PER_PROVINCE} landmarks (US-16 AC2 cap for Overpass, raised for US-27's richer TAT source)`, () => {
     const counts = new Map<string, number>();
     for (const l of LANDMARKS) counts.set(l.provinceId, (counts.get(l.provinceId) ?? 0) + 1);
     for (const [provinceId, count] of counts) {
-      expect(count).toBeLessThanOrEqual(5);
+      expect(count).toBeLessThanOrEqual(MAX_LANDMARKS_PER_PROVINCE);
+    }
+  });
+
+  it('every US-27 (TAT-sourced) landmark has a non-empty description and category — the two fields the older Overpass merge never had', () => {
+    const tatLandmarks = LANDMARKS.filter((l) => l.id.startsWith('tat-'));
+    expect(tatLandmarks.length).toBeGreaterThan(0);
+    for (const l of tatLandmarks) {
+      expect(l.description?.trim()).toBeTruthy();
+      expect(l.category?.trim()).toBeTruthy();
     }
   });
 

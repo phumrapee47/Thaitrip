@@ -135,6 +135,12 @@ describe('LandmarkList in-province search & category filter (US-23)', () => {
     dbMock.__seedCheckins([]);
     jest.clearAllMocks();
     wikipediaServiceMock.fetchAttractionsForProvince.mockResolvedValue([WIKI_LANDMARK, WIKI_LANDMARK_NO_IMAGE]);
+    // Live Universal Search (added after this test file): the real
+    // searchAttractionsGlobal always resolves to an array (it catches its own
+    // errors internally), but jest's auto-mock defaults an unstubbed export to
+    // a plain `jest.fn()` returning `undefined` — which crashes
+    // `liveResults.filter(...)` in LandmarkList once the search debounce fires.
+    wikipediaServiceMock.searchAttractionsGlobal.mockResolvedValue([]);
   });
 
   it('filters the visible cards in real time by name as the user types, scoped to this province only (AC1)', async () => {

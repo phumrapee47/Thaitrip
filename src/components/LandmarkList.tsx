@@ -1,10 +1,10 @@
-﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import type { Landmark } from '../data/thailand-landmarks';
 import { getLandmarksForProvince } from '../data/thailand-landmarks';
 import { getLandmarkProgress } from '../utils/landmarkDerived';
-import { fetchAttractionsForProvince } from '../services/wikipediaService';
+import { fetchAttractionsForProvince, resolveRealPhotoForLandmark, searchAttractionsGlobal } from '../services/wikipediaService';
 import { PROVINCES } from '../data/thailand-provinces';
 import LandmarkCard from './LandmarkCard';
 import LandmarkProgressIndicator from './LandmarkProgressIndicator';
@@ -12,6 +12,8 @@ import LandmarkMap from './LandmarkMap';
 import EmptyStateLandmarks from './EmptyStateLandmarks';
 import ShimmerBlock from './ShimmerBlock';
 import PressableScale from './PressableScale';
+import EntranceFadeItem from './EntranceFadeItem';
+import { useEntrancePlayedOnce } from '../hooks/useEntrancePlayedOnce';
 import { COLORS, CATEGORY_COLORS, RADIUS, SHADOWS, SPACING } from '../theme';
 
 export interface LandmarkListProps {
@@ -47,12 +49,14 @@ export default function LandmarkList({
   const [fetchError, setFetchError] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('ทั้งหมด');
-  // Advanced UI/UX Upgrade v3: map/card view toggle — the scatter-plot map no
-  // longer occupies the first fold by default (it was crowding the photo
-  // cards above the fold); it now only renders when the user explicitly
-  // switches to "แผนที่" mode, matching advanced-mobile-uiux SKILL.md's
-  // "let the hero imagery breathe" guidance.
+  // Advanced UI/UX Upgrade v3: map/card view toggle
   const [viewMode, setViewMode] = useState<'cards' | 'map'>('cards');
+  // Track which landmark IDs are currently resolving their real photo
+  const [resolvingPhotos, setResolvingPhotos] = useState<Set<string>>(new Set());
+  // Live universal search results (from Wikipedia) — separate from landmarks
+  const [liveResults, setLiveResults] = useState<Landmark[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isMountedRef = useRef(true);
   const fetchIdRef = useRef(0);
 
@@ -140,7 +144,92 @@ export default function LandmarkList({
     loadWikipediaAttractions();
   }, [loadWikipediaAttractions]);
 
+  // After Wikipedia attractions load, resolve real photos for landmarks that
+  // still have no imageUrl (seed items without Wikipedia coverage).
+  useEffect(() => {
+    const noImageLandmarks = landmarks.filter((l) => !l.imageUrl);
+    if (noImageLandmarks.length === 0) return;
+
+    const batchSize = 3;
+    let cancelled = false;
+
+    (async () => {
+      for (let i = 0; i < noImageLandmarks.length; i += batchSize) {
+        if (cancelled || !isMountedRef.current) break;
+        const batch = noImageLandmarks.slice(i, i + batchSize);
+
+        // Mark as resolving
+        setResolvingPhotos((prev) => {
+          const next = new Set(prev);
+          batch.forEach((l) => next.add(l.id));
+          return next;
+        });
+
+        await Promise.allSettled(
+          batch.map(async (lm) => {
+            const url = await resolveRealPhotoForLandmark(lm.nameTh, provinceNameTh);
+            if (url && !cancelled && isMountedRef.current) {
+              setLandmarks((prev) =>
+                prev.map((item) => (item.id === lm.id && !item.imageUrl ? { ...item, imageUrl: url } : item))
+              );
+            }
+            if (!cancelled && isMountedRef.current) {
+              setResolvingPhotos((prev) => {
+                const next = new Set(prev);
+                next.delete(lm.id);
+                return next;
+              });
+            }
+          })
+        );
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // Only re-run when provinceId or provinceNameTh changes (not on every render)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [provinceId, provinceNameTh]);
+
+  // Live Universal Search — debounced Wikipedia query across all of Thailand
+  const handleSearchChange = useCallback(
+    (text: string) => {
+      setSearchQuery(text);
+      setLiveResults([]);
+
+      if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+      const trimmed = text.trim();
+      if (trimmed.length < 2) {
+        setIsSearching(false);
+        return;
+      }
+
+      setIsSearching(true);
+      searchTimerRef.current = setTimeout(async () => {
+        try {
+          // Nationwide, not scoped to the current province — see wikipediaService.ts:
+          // scoping this query to provinceNameTh used to silently defeat "search ทั่วไทย".
+          const results = await searchAttractionsGlobal(trimmed);
+          if (isMountedRef.current) {
+            setLiveResults(results);
+          }
+        } catch {
+          // silently ignore search errors
+        } finally {
+          if (isMountedRef.current) setIsSearching(false);
+        }
+      }, 450);
+    },
+    []
+  );
+
   const progress = getLandmarkProgress(provinceId, landmarks, checkins);
+
+  // T120 / US-34 AC2 (docs/design-spec.md §2.1): plays exactly once, the first
+  // time this province has any landmarks to show — never re-triggers on later
+  // re-renders (checkin toggles, Wikipedia enrichment appending more items).
+  const shouldPlayEntrance = useEntrancePlayedOnce(landmarks.length > 0);
 
   const handleToggle = useCallback(
     (landmarkId: string, pId: string) => {
@@ -155,21 +244,33 @@ export default function LandmarkList({
     setSelectedCategory(cat);
   }, []);
 
+  // When searchQuery has input: merge local filter + live Wikipedia results
   const filteredLandmarks = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    return landmarks.filter((item) => {
+    if (!q) {
+      // No query — apply only category filter on all landmarks
+      return selectedCategory === 'ทั้งหมด'
+        ? landmarks
+        : landmarks.filter((l) => l.category === selectedCategory);
+    }
+
+    const localMatches = landmarks.filter((item) => {
       const matchQuery =
-        !q ||
         item.nameTh.toLowerCase().includes(q) ||
         (item.description && item.description.toLowerCase().includes(q)) ||
         (item.category && item.category.toLowerCase().includes(q));
-
       const matchCategory =
         selectedCategory === 'ทั้งหมด' || item.category === selectedCategory;
-
       return matchQuery && matchCategory;
     });
-  }, [landmarks, searchQuery, selectedCategory]);
+
+    // Merge live Wikipedia results, deduplicating by nameTh
+    const seenNames = new Set(localMatches.map((l) => l.nameTh.trim()));
+    const liveMerged = liveResults.filter((r) => !seenNames.has(r.nameTh.trim()));
+
+    return [...localMatches, ...liveMerged];
+  }, [landmarks, liveResults, searchQuery, selectedCategory]);
+
 
   // T88 / US-25 AC1,2,5: a real fetch failure (T87 threw) with nothing else
   // to show — distinct component/copy from EmptyStateLandmarks, with a T89
@@ -257,19 +358,21 @@ export default function LandmarkList({
             <Text style={styles.searchIcon}>🔍</Text>
             <TextInput
               style={styles.searchInput}
-              placeholder={`ค้นหาสถานที่ใน ${provinceNameTh}...`}
+              placeholder={`ค้นหาสถานที่ใน ${provinceNameTh} หรือทั่วไทย...`}
               placeholderTextColor="#888"
               value={searchQuery}
-              onChangeText={setSearchQuery}
+              onChangeText={handleSearchChange}
               autoCapitalize="none"
               autoCorrect={false}
               returnKeyType="search"
             />
-            {searchQuery.length > 0 && (
-              <Pressable onPress={() => setSearchQuery('')} hitSlop={8} style={styles.clearBtn}>
+            {isSearching ? (
+              <ActivityIndicator size="small" color={COLORS.accent} style={styles.clearBtn} />
+            ) : searchQuery.length > 0 ? (
+              <Pressable onPress={() => handleSearchChange('')} hitSlop={8} style={styles.clearBtn}>
                 <Text style={styles.clearText}>✕</Text>
               </Pressable>
-            )}
+            ) : null}
           </View>
 
           {/* Category Pills */}
@@ -296,9 +399,7 @@ export default function LandmarkList({
             })}
           </ScrollView>
 
-          {/* Loading Indicator (enrichment in progress, initial content already visible).
-              Suppressed while the error banner above is retrying, to avoid two
-              competing loading indicators on screen at once (T89). */}
+          {/* Loading Indicator (enrichment in progress, initial content already visible). */}
           {isFetchingWiki && !fetchError && landmarks.length <= initialLandmarks.length && (
             <View style={styles.loadingBox}>
               <ShimmerBlock style={styles.loadingDot} />
@@ -310,27 +411,61 @@ export default function LandmarkList({
           {filteredLandmarks.length === 0 ? (
             <View style={styles.emptyBox}>
               <Text style={styles.emptyIcon}>📍</Text>
-              <Text style={styles.emptyText}>ไม่พบสถานที่ที่ตรงกับการค้นหา</Text>
+              <Text style={styles.emptyText}>
+                {isSearching ? 'กำลังค้นหาสถานที่ทั่วประเทศไทย...' : 'ไม่พบสถานที่ที่ตรงกับการค้นหา'}
+              </Text>
             </View>
           ) : (
             <View style={styles.cardList}>
-              <LandmarkCard
-                key={filteredLandmarks[0].id}
-                landmark={filteredLandmarks[0]}
-                visited={Boolean(checkins[filteredLandmarks[0].id])}
-                onToggle={() => handleToggle(filteredLandmarks[0].id, provinceId)}
-                variant="hero"
-              />
-              <View style={styles.grid}>
-                {filteredLandmarks.slice(1).map((landmark) => (
+              {shouldPlayEntrance ? (
+                <EntranceFadeItem index={0}>
                   <LandmarkCard
-                    key={landmark.id}
-                    landmark={landmark}
-                    visited={Boolean(checkins[landmark.id])}
-                    onToggle={() => handleToggle(landmark.id, provinceId)}
-                    variant="compact"
+                    key={filteredLandmarks[0].id}
+                    landmark={filteredLandmarks[0]}
+                    visited={Boolean(checkins[filteredLandmarks[0].id])}
+                    onToggle={() => handleToggle(filteredLandmarks[0].id, filteredLandmarks[0].provinceId || provinceId)}
+                    variant="hero"
+                    imageLoading={resolvingPhotos.has(filteredLandmarks[0].id)}
                   />
-                ))}
+                </EntranceFadeItem>
+              ) : (
+                <LandmarkCard
+                  key={filteredLandmarks[0].id}
+                  landmark={filteredLandmarks[0]}
+                  visited={Boolean(checkins[filteredLandmarks[0].id])}
+                  onToggle={() => handleToggle(filteredLandmarks[0].id, filteredLandmarks[0].provinceId || provinceId)}
+                  variant="hero"
+                  imageLoading={resolvingPhotos.has(filteredLandmarks[0].id)}
+                />
+              )}
+              <View style={styles.grid}>
+                {filteredLandmarks.slice(1).map((landmark, i) =>
+                  shouldPlayEntrance ? (
+                    // Note: the wrapper (not the card) owns the 48.5% grid-column
+                    // width here — the card itself is told to fill 100% of it —
+                    // because a percentage width on the card alone would be
+                    // relative to an as-yet-unsized Animated.View wrapper.
+                    <EntranceFadeItem key={landmark.id} index={i + 1} style={styles.gridItemWrap}>
+                      <LandmarkCard
+                        landmark={landmark}
+                        visited={Boolean(checkins[landmark.id])}
+                        onToggle={() => handleToggle(landmark.id, landmark.provinceId || provinceId)}
+                        variant="compact"
+                        imageLoading={resolvingPhotos.has(landmark.id)}
+                        style={styles.gridItemCardFill}
+                      />
+                    </EntranceFadeItem>
+                  ) : (
+                    <LandmarkCard
+                      key={landmark.id}
+                      landmark={landmark}
+                      visited={Boolean(checkins[landmark.id])}
+                      onToggle={() => handleToggle(landmark.id, landmark.provinceId || provinceId)}
+                      variant="compact"
+                      imageLoading={resolvingPhotos.has(landmark.id)}
+                    />
+                  )
+                )}
               </View>
             </View>
           )}
@@ -563,5 +698,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'space-between',
+  },
+  // T120: the entrance-animated grid item owns the 2-col width itself so the
+  // wrapped LandmarkCard (told to fill 100% via `gridItemCardFill`) doesn't
+  // resolve a nested percentage against an unsized parent.
+  gridItemWrap: {
+    width: '48.5%',
+  },
+  gridItemCardFill: {
+    width: '100%',
   },
 });
